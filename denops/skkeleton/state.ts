@@ -77,16 +77,21 @@ export type HenkanState = Omit<InputState, "type"> & {
   word: string;
   candidates: string[];
   candidateIndex: number;
+  /** LLM 由来の候補のインデックス集合 */
+  llmCandidateIndices: Set<number>;
 };
 
 export function henkanStateToString(state: HenkanState): string {
   const candidate =
     modifyCandidate(state.candidates[state.candidateIndex], state.affix) ??
       "error";
+  const llmTag = state.llmCandidateIndices?.has(state.candidateIndex)
+    ? "[LLM]"
+    : "";
   const okuriStr = state.converter
     ? state.converter(state.okuriFeed)
     : state.okuriFeed;
-  return config.markerHenkanSelect + candidate + okuriStr;
+  return config.markerHenkanSelect + candidate + llmTag + okuriStr;
 }
 
 export type EscapeState = {

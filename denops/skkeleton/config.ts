@@ -35,6 +35,19 @@ export const config: Omit<ConfigOptions, "globalDictionaries"> & {
   skkServerResEnc: "euc-jp",
   sources: ["skk_dictionary"],
   userDictionary: "~/.skkeleton",
+  // LLM defaults (disabled by default)
+  llmEnabled: false,
+  llmProvider: "local" as const,
+  llmEndpoint: "http://127.0.0.1:8080",
+  llmApiKey: "",
+  llmModel: "",
+  llmTimeoutMs: 500,
+  llmRerankEnabled: false,
+  llmFallbackEnabled: false,
+  llmContextLines: 5,
+  llmRerankMaxCandidates: 10,
+  llmLearningEnabled: false,
+  llmLearningLogPath: "~/.skk/learning.jsonl",
 };
 
 type Validators = {
@@ -119,6 +132,25 @@ const validators: Validators = {
     throw '`useSkkServer` is removed. Please use `sources` with "skk_server"';
   },
   userDictionary: (x) => ensure(x, is.String),
+  // LLM validators
+  llmEnabled: (x) => ensure(x, is.Boolean),
+  llmProvider: (x): "local" | "cloud" => {
+    const v = ensure(x, is.String);
+    if (v !== "local" && v !== "cloud") {
+      throw TypeError("llmProvider must be 'local' or 'cloud'");
+    }
+    return v;
+  },
+  llmEndpoint: (x) => ensure(x, is.String),
+  llmApiKey: (x) => ensure(x, is.String),
+  llmModel: (x) => ensure(x, is.String),
+  llmTimeoutMs: (x) => ensure(x, is.Number),
+  llmRerankEnabled: (x) => ensure(x, is.Boolean),
+  llmFallbackEnabled: (x) => ensure(x, is.Boolean),
+  llmContextLines: (x) => ensure(x, is.Number),
+  llmRerankMaxCandidates: (x) => ensure(x, is.Number),
+  llmLearningEnabled: (x) => ensure(x, is.Boolean),
+  llmLearningLogPath: (x) => ensure(x, is.String),
 };
 
 async function normalize(
@@ -148,6 +180,10 @@ async function normalize(
     denops,
   );
   config.databasePath = await homeExpand(config.databasePath, denops);
+  config.llmLearningLogPath = await homeExpand(
+    config.llmLearningLogPath,
+    denops,
+  );
 }
 
 export async function setConfig(

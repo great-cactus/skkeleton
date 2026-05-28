@@ -57,4 +57,17 @@ export type ConfigOptions = {
   useGoogleJapaneseInput?: never;
   useSkkServer?: never;
   userDictionary: string;
+  // LLM integration options
+  llmEnabled: boolean;
+  llmProvider: "local" | "cloud";
+  llmEndpoint: string;
+  llmApiKey: string;
+  llmModel: string;
+  llmTimeoutMs: number;
+  llmRerankEnabled: boolean;
+  llmFallbackEnabled: boolean;
+  llmContextLines: number;
+  llmRerankMaxCandidates: number;
+  llmLearningEnabled: boolean;
+  llmLearningLogPath: string;
 };
