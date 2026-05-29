@@ -1,4 +1,4 @@
-import type { LlmCandidate, LlmHenkanRequest, LlmRerankRequest } from "./types.ts";
+import type { LlmGenerateRequest, LlmScoreRequest, ScoredCandidate } from "./types.ts";
 
 /** LLM プロバイダの抽象インターフェース */
 export interface LlmProvider {
@@ -6,18 +6,20 @@ export interface LlmProvider {
   readonly name: string;
 
   /**
-   * 変換候補を生成する。
-   * @param request - かな列、変換タイプ、周辺コンテキスト
-   * @returns 候補文字列の配列（スコア降順）
+   * F2: 各候補のlogprobsスコアを算出し、リランクされた候補配列を返す。
+   * バッチリクエストで全候補を並列評価する。
+   * @param request - 候補一覧 + コンテキスト
+   * @returns スコア降順にソートされた候補配列
    */
-  generateCandidates(request: LlmHenkanRequest): Promise<LlmCandidate[]>;
+  scoreCandidates(request: LlmScoreRequest): Promise<ScoredCandidate[]>;
 
   /**
-   * 既存の候補をコンテキストに基づいてリランクする。
-   * @param request - 既存候補 + コンテキスト
-   * @returns リランク済み候補配列
+   * F1: 辞書に候補がない場合、LLMにかな→漢字変換候補を生成させる。
+   * Chat Completion方式で候補を生成する。
+   * @param request - かな列 + コンテキスト
+   * @returns 候補文字列の配列（尤度降順）
    */
-  rerankCandidates(request: LlmRerankRequest): Promise<LlmCandidate[]>;
+  generateCandidates(request: LlmGenerateRequest): Promise<string[]>;
 
   /** ヘルスチェック（起動時・設定変更時に呼ばれる） */
   healthCheck(): Promise<boolean>;
@@ -33,6 +35,8 @@ export type LlmProviderConfig = {
   apiKey: string;
   /** モデル名 */
   model: string;
-  /** リクエストタイムアウト (ms) */
+  /** F2リランキングのタイムアウト (ms) */
   timeoutMs: number;
+  /** F1フォールバックのタイムアウト (ms) */
+  fallbackTimeoutMs: number;
 };

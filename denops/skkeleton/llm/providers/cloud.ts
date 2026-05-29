@@ -1,6 +1,6 @@
 import type { LlmProvider, LlmProviderConfig } from "../provider.ts";
-import type { LlmCandidate, LlmHenkanRequest, LlmRerankRequest } from "../types.ts";
-import { buildGeneratePrompt, buildRerankPrompt, parseGenerateResponse, parseRerankResponse } from "../prompt.ts";
+import type { LlmGenerateRequest, LlmScoreRequest, ScoredCandidate } from "../types.ts";
+import { buildGeneratePrompt, parseGenerateResponse } from "../prompt.ts";
 import { deadline } from "@std/async/deadline";
 
 type ChatMessage = {
@@ -16,8 +16,23 @@ type ChatCompletionResponse = {
   }>;
 };
 
+type CompletionChoice = {
+  index: number;
+  logprobs?: {
+    tokens: string[];
+    token_logprobs: (number | null)[];
+  };
+};
+
+type CompletionResponse = {
+  choices: CompletionChoice[];
+};
+
 /**
  * クラウド LLM プロバイダ（OpenAI 互換 API + 認証）
+ *
+ * F2: /v1/completions + logprobs でバッチスコアリング
+ * F1: /v1/chat/completions でかな→漢字候補を生成
  */
 export class CloudLlmProvider implements LlmProvider {
   readonly name = "cloud";
@@ -25,49 +40,101 @@ export class CloudLlmProvider implements LlmProvider {
   #apiKey: string;
   #model: string;
   #timeoutMs: number;
+  #fallbackTimeoutMs: number;
 
   constructor(config: LlmProviderConfig) {
     this.#endpoint = config.endpoint.replace(/\/$/, "");
     this.#apiKey = config.apiKey;
     this.#model = config.model;
     this.#timeoutMs = config.timeoutMs;
+    this.#fallbackTimeoutMs = config.fallbackTimeoutMs;
   }
 
-  async generateCandidates(req: LlmHenkanRequest): Promise<LlmCandidate[]> {
-    const prompt = buildGeneratePrompt(req);
+  async scoreCandidates(req: LlmScoreRequest): Promise<ScoredCandidate[]> {
+    if (req.candidates.length === 0) return [];
+
+    const prompts = req.candidates.map(
+      (c) => `${req.contextBefore}${c}${req.contextAfter}`,
+    );
+    const prefixPrompt = req.contextBefore;
+
     try {
-      const content = await this.#chatCompletion([
-        { role: "user", content: prompt },
-      ]);
-      const values = parseGenerateResponse(content);
-      return values.map((value, i) => ({
-        value,
-        score: 1.0 - i * 0.1,
-        isLlmGenerated: true,
-      }));
+      const allPrompts = [prefixPrompt, ...prompts];
+      const body = JSON.stringify({
+        model: this.#model,
+        prompt: allPrompts,
+        max_tokens: 0,
+        echo: true,
+        logprobs: 1,
+      });
+
+      const resp = await deadline(
+        fetch(`${this.#endpoint}/v1/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${this.#apiKey}`,
+          },
+          body,
+        }),
+        this.#timeoutMs,
+      );
+
+      if (!resp.ok) {
+        await resp.body?.cancel();
+        return [];
+      }
+
+      const json = await resp.json() as CompletionResponse;
+      const choices = json.choices;
+
+      if (!choices || choices.length < 2) return [];
+
+      const prefixChoice = choices.find((c) => c.index === 0);
+      const prefixTokenCount = prefixChoice?.logprobs?.tokens?.length ?? 0;
+
+      const scored: ScoredCandidate[] = [];
+      for (let i = 0; i < req.candidates.length; i++) {
+        const choice = choices.find((c) => c.index === i + 1);
+        if (!choice?.logprobs) continue;
+
+        const { token_logprobs } = choice.logprobs;
+        const totalTokens = token_logprobs.length;
+
+        let sum = 0;
+        let count = 0;
+        for (let j = prefixTokenCount; j < totalTokens; j++) {
+          const lp = token_logprobs[j];
+          if (lp !== null) {
+            sum += lp;
+            count++;
+          }
+        }
+
+        scored.push({
+          value: req.candidates[i],
+          logprobSum: sum,
+          logprobAvg: count > 0 ? sum / count : -Infinity,
+        });
+      }
+
+      scored.sort((a, b) => b.logprobSum - a.logprobSum);
+      return scored;
     } catch {
       return [];
     }
   }
 
-  async rerankCandidates(req: LlmRerankRequest): Promise<LlmCandidate[]> {
-    const prompt = buildRerankPrompt(req);
+  async generateCandidates(req: LlmGenerateRequest): Promise<string[]> {
+    const prompt = buildGeneratePrompt(req);
     try {
-      const content = await this.#chatCompletion([
-        { role: "user", content: prompt },
-      ]);
-      const reordered = parseRerankResponse(content, req.candidates);
-      return reordered.map((value, i) => ({
-        value,
-        score: 1.0 - i * (1.0 / reordered.length),
-        isLlmGenerated: false,
-      }));
+      const content = await this.#chatCompletion(
+        [{ role: "user", content: prompt }],
+        this.#fallbackTimeoutMs,
+      );
+      return parseGenerateResponse(content);
     } catch {
-      return req.candidates.map((value, i) => ({
-        value,
-        score: 1.0 - i * (1.0 / req.candidates.length),
-        isLlmGenerated: false,
-      }));
+      return [];
     }
   }
 
@@ -88,7 +155,7 @@ export class CloudLlmProvider implements LlmProvider {
     }
   }
 
-  async #chatCompletion(messages: ChatMessage[]): Promise<string> {
+  async #chatCompletion(messages: ChatMessage[], timeoutMs: number): Promise<string> {
     const body = JSON.stringify({
       model: this.#model,
       messages,
@@ -105,7 +172,7 @@ export class CloudLlmProvider implements LlmProvider {
         },
         body,
       }),
-      this.#timeoutMs,
+      timeoutMs,
     );
 
     if (!resp.ok) {

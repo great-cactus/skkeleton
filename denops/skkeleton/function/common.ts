@@ -2,7 +2,6 @@ import { modifyCandidate } from "../candidate.ts";
 import { config } from "../config.ts";
 import { Context } from "../context.ts";
 import { HenkanType } from "../dictionary.ts";
-import { appendLearningLog, type LearningRecord } from "../llm/learning.ts";
 import { initializeStateWithAbbrev } from "../mode.ts";
 import { initializeState } from "../state.ts";
 import { currentLibrary } from "../store.ts";
@@ -28,21 +27,6 @@ export async function kakutei(context: Context) {
           candidate,
         };
       }
-      // F3: 学習ログに記録（fire-and-forget）
-      if (config.llmEnabled && config.llmLearningEnabled) {
-        const isLlm = state.llmCandidateIndices?.has(state.candidateIndex) ?? false;
-        recordLlmLearning({
-          word: state.word,
-          selected: candidate,
-          type: state.mode,
-          candidates: [...state.candidates],
-          selectedIndex: state.candidateIndex,
-          contextBefore: "",  // バッファコンテキストは非同期取得が必要なので空
-          contextAfter: "",
-          source: isLlm ? "llm" : "dictionary",
-        }).catch(() => {/* ignore */});
-      }
-
       const okuriStr = state.converter
         ? state.converter(state.okuriFeed)
         : state.okuriFeed;
@@ -109,26 +93,6 @@ export async function cancel(context: Context) {
     case "henkan":
       context.state.type = "input";
       break;
-  }
-}
-
-/**
- * LLM 学習ログに変換結果を記録する（fire-and-forget）
- */
-export async function recordLlmLearning(
-  params: Omit<LearningRecord, "ts">,
-): Promise<void> {
-  if (!config.llmEnabled || !config.llmLearningEnabled) {
-    return;
-  }
-  try {
-    const record: LearningRecord = {
-      ts: new Date().toISOString(),
-      ...params,
-    };
-    await appendLearningLog(config.llmLearningLogPath, record);
-  } catch {
-    // 書き込み失敗時は無視
   }
 }
 

@@ -1,11 +1,9 @@
 import { assertEquals } from "jsr:@std/assert@1/equals";
 import { config } from "../config.ts";
 import type { HenkanState } from "../state.ts";
-import type { LlmCandidate } from "../llm/types.ts";
 import { MockLlmProvider } from "../llm/provider_test.ts";
 import {
   applyLlmFallbackCandidates,
-  applyRerankResult,
   shouldLlmFallback,
   shouldLlmRerank,
 } from "./henkan.ts";
@@ -96,39 +94,43 @@ Deno.test("shouldLlmFallback - false when provider is null", () => {
 
 // --- shouldLlmRerank ---
 
-Deno.test("shouldLlmRerank - true when 2+ candidates and LLM rerank enabled", () => {
-  const orig = { llmEnabled: config.llmEnabled, llmRerankEnabled: config.llmRerankEnabled };
+Deno.test("shouldLlmRerank - true when 2+ candidates and LLM enabled", () => {
+  const orig = { llmEnabled: config.llmEnabled };
   try {
     config.llmEnabled = true;
-    config.llmRerankEnabled = true;
     assertEquals(shouldLlmRerank(2, new MockLlmProvider()), true);
   } finally {
     config.llmEnabled = orig.llmEnabled;
-    config.llmRerankEnabled = orig.llmRerankEnabled;
   }
 });
 
 Deno.test("shouldLlmRerank - false when only 1 candidate", () => {
-  const orig = { llmEnabled: config.llmEnabled, llmRerankEnabled: config.llmRerankEnabled };
+  const orig = { llmEnabled: config.llmEnabled };
   try {
     config.llmEnabled = true;
-    config.llmRerankEnabled = true;
     assertEquals(shouldLlmRerank(1, new MockLlmProvider()), false);
   } finally {
     config.llmEnabled = orig.llmEnabled;
-    config.llmRerankEnabled = orig.llmRerankEnabled;
   }
 });
 
-Deno.test("shouldLlmRerank - false when rerank disabled", () => {
-  const orig = { llmEnabled: config.llmEnabled, llmRerankEnabled: config.llmRerankEnabled };
+Deno.test("shouldLlmRerank - false when LLM disabled", () => {
+  const orig = { llmEnabled: config.llmEnabled };
   try {
-    config.llmEnabled = true;
-    config.llmRerankEnabled = false;
+    config.llmEnabled = false;
     assertEquals(shouldLlmRerank(5, new MockLlmProvider()), false);
   } finally {
     config.llmEnabled = orig.llmEnabled;
-    config.llmRerankEnabled = orig.llmRerankEnabled;
+  }
+});
+
+Deno.test("shouldLlmRerank - false when provider is null", () => {
+  const orig = { llmEnabled: config.llmEnabled };
+  try {
+    config.llmEnabled = true;
+    assertEquals(shouldLlmRerank(5, null), false);
+  } finally {
+    config.llmEnabled = orig.llmEnabled;
   }
 });
 
@@ -136,12 +138,7 @@ Deno.test("shouldLlmRerank - false when rerank disabled", () => {
 
 Deno.test("applyLlmFallbackCandidates - adds candidates and marks indices", () => {
   const state = makeHenkanState();
-  const llmCandidates: LlmCandidate[] = [
-    { value: "漢字", score: 0.9, isLlmGenerated: true },
-    { value: "感じ", score: 0.8, isLlmGenerated: true },
-  ];
-
-  applyLlmFallbackCandidates(state, llmCandidates);
+  applyLlmFallbackCandidates(state, ["漢字", "感じ"]);
 
   assertEquals(state.candidates, ["漢字", "感じ"]);
   assertEquals(state.llmCandidateIndices, new Set([0, 1]));
@@ -149,11 +146,7 @@ Deno.test("applyLlmFallbackCandidates - adds candidates and marks indices", () =
 
 Deno.test("applyLlmFallbackCandidates - appends to existing candidates", () => {
   const state = makeHenkanState({ candidates: ["既存候補"] });
-  const llmCandidates: LlmCandidate[] = [
-    { value: "LLM候補", score: 0.7, isLlmGenerated: true },
-  ];
-
-  applyLlmFallbackCandidates(state, llmCandidates);
+  applyLlmFallbackCandidates(state, ["LLM候補"]);
 
   assertEquals(state.candidates, ["既存候補", "LLM候補"]);
   assertEquals(state.llmCandidateIndices, new Set([1]));
@@ -164,72 +157,4 @@ Deno.test("applyLlmFallbackCandidates - empty array does nothing", () => {
   applyLlmFallbackCandidates(state, []);
   assertEquals(state.candidates, []);
   assertEquals(state.llmCandidateIndices.size, 0);
-});
-
-// --- applyRerankResult ---
-
-Deno.test("applyRerankResult - reorders when candidateIndex <= 0", () => {
-  const state = makeHenkanState({
-    candidates: ["A", "B", "C"],
-    candidateIndex: 0,
-  });
-  const result: LlmCandidate[] = [
-    { value: "C", score: 0.9, isLlmGenerated: false },
-    { value: "A", score: 0.8, isLlmGenerated: false },
-    { value: "B", score: 0.7, isLlmGenerated: false },
-  ];
-
-  applyRerankResult(state, result, ["A", "B", "C"], 10);
-
-  assertEquals(state.candidates, ["C", "A", "B"]);
-});
-
-Deno.test("applyRerankResult - preserves remaining candidates beyond maxCandidates", () => {
-  const state = makeHenkanState({
-    candidates: ["A", "B", "C", "D", "E"],
-    candidateIndex: -1,
-  });
-  const result: LlmCandidate[] = [
-    { value: "B", score: 0.9, isLlmGenerated: false },
-    { value: "A", score: 0.8, isLlmGenerated: false },
-  ];
-  // maxCandidates=2 means D,E are "remaining"
-  applyRerankResult(state, result, ["A", "B", "C", "D", "E"], 2);
-
-  assertEquals(state.candidates, ["B", "A", "C", "D", "E"]);
-});
-
-Deno.test("applyRerankResult - does not update when candidateIndex > 0", () => {
-  const state = makeHenkanState({
-    candidates: ["A", "B", "C"],
-    candidateIndex: 1,
-  });
-  const result: LlmCandidate[] = [
-    { value: "C", score: 0.9, isLlmGenerated: false },
-    { value: "B", score: 0.8, isLlmGenerated: false },
-    { value: "A", score: 0.7, isLlmGenerated: false },
-  ];
-
-  applyRerankResult(state, result, ["A", "B", "C"], 10);
-
-  // Should NOT change because user already moved past first candidate
-  assertEquals(state.candidates, ["A", "B", "C"]);
-});
-
-Deno.test("applyRerankResult - does not update when state is no longer henkan", () => {
-  const state = makeHenkanState({
-    candidates: ["A", "B"],
-    candidateIndex: 0,
-  });
-  // Simulate user having confirmed (state type changed)
-  (state as unknown as { type: string }).type = "input";
-
-  const result: LlmCandidate[] = [
-    { value: "B", score: 0.9, isLlmGenerated: false },
-    { value: "A", score: 0.8, isLlmGenerated: false },
-  ];
-
-  applyRerankResult(state, result, ["A", "B"], 10);
-
-  assertEquals(state.candidates, ["A", "B"]);
 });

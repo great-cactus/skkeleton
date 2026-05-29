@@ -3,7 +3,6 @@ import { config } from "../config.ts";
 import type { Context } from "../context.ts";
 import { handleKey } from "../keymap.ts";
 import { keyToNotation } from "../notation.ts";
-import type { LlmCandidate } from "../llm/types.ts";
 import type { LlmProvider } from "../llm/provider.ts";
 import { getOkuriStr } from "../okuri.ts";
 import { HenkanState } from "../state.ts";
@@ -68,6 +67,32 @@ export async function henkanFirst(context: Context, key: string) {
   }
   state.candidates = await lib.getHenkanResult(state.mode, word);
 
+  // F2: LLM リランキング — 辞書候補が2件以上あるとき（同期・ブロッキング）
+  // タイムアウト内にスコアリングが完了すれば並べ替えた状態で候補を表示する
+  if (shouldLlmRerank(state.candidates.length, currentLlmProvider)) {
+    try {
+      const ctx = context.denops
+        ? await fetchBufferContext(context.denops, config.llmContextLines)
+        : { before: "", after: "" };
+      const maxCandidates = config.llmRerankMaxCandidates;
+      const toScore = state.candidates.slice(0, maxCandidates);
+      const scored = await currentLlmProvider!.scoreCandidates({
+        word,
+        type: state.mode,
+        candidates: toScore,
+        contextBefore: ctx.before,
+        contextAfter: ctx.after,
+      });
+      if (scored.length > 0) {
+        const reranked = scored.map((s) => s.value);
+        const remaining = state.candidates.slice(maxCandidates);
+        state.candidates = [...reranked, ...remaining];
+      }
+    } catch {
+      // スコアリング失敗時は辞書順のまま
+    }
+  }
+
   // F1: LLM フォールバック — 辞書に候補がないとき
   if (shouldLlmFallback(state.candidates.length, currentLlmProvider)) {
     try {
@@ -83,33 +108,6 @@ export async function henkanFirst(context: Context, key: string) {
       applyLlmFallbackCandidates(state, llmCandidates);
     } catch {
       // LLM エラー時は無視して従来通り
-    }
-  }
-
-  // F2: LLM リランキング — 辞書候補が2件以上あるとき（非同期・ノンブロッキング）
-  if (shouldLlmRerank(state.candidates.length, currentLlmProvider)) {
-    // バックグラウンドでリランキングを発火（結果が返る前にユーザは操作可能）
-    const provider = currentLlmProvider!;
-    const candidatesCopy = [...state.candidates];
-    const maxCandidates = config.llmRerankMaxCandidates;
-    const denops = context.denops;
-
-    if (denops) {
-      fetchBufferContext(denops, config.llmContextLines).then(async (ctx) => {
-        try {
-          const toRerank = candidatesCopy.slice(0, maxCandidates);
-          const result = await provider.rerankCandidates({
-            word,
-            type: state.mode,
-            candidates: toRerank,
-            contextBefore: ctx.before,
-            contextAfter: ctx.after,
-          });
-          applyRerankResult(state, result, candidatesCopy, maxCandidates);
-        } catch {
-          // リランク失敗時は何もしない
-        }
-      });
     }
   }
 
@@ -256,7 +254,6 @@ export function shouldLlmRerank(
   return (
     candidateCount >= 2 &&
     config.llmEnabled &&
-    config.llmRerankEnabled &&
     provider != null
   );
 }
@@ -266,30 +263,11 @@ export function shouldLlmRerank(
  */
 export function applyLlmFallbackCandidates(
   state: HenkanState,
-  llmCandidates: LlmCandidate[],
+  llmCandidates: string[],
 ): void {
   const baseIndex = state.candidates.length;
   for (let i = 0; i < llmCandidates.length; i++) {
-    state.candidates.push(llmCandidates[i].value);
+    state.candidates.push(llmCandidates[i]);
     state.llmCandidateIndices.add(baseIndex + i);
-  }
-}
-
-/**
- * F2 リランク結果を state に反映する（ユーザ未確定時のみ）
- */
-export function applyRerankResult(
-  state: HenkanState,
-  result: LlmCandidate[],
-  originalCandidates: string[],
-  maxCandidates: number,
-): void {
-  if (
-    state.type === "henkan" &&
-    state.candidateIndex <= 0
-  ) {
-    const reranked = result.map((c) => c.value);
-    const remaining = originalCandidates.slice(maxCandidates);
-    state.candidates = [...reranked, ...remaining];
   }
 }

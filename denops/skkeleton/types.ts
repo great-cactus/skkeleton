@@ -64,10 +64,8 @@ export type ConfigOptions = {
   llmApiKey: string;
   llmModel: string;
   llmTimeoutMs: number;
-  llmRerankEnabled: boolean;
   llmFallbackEnabled: boolean;
+  llmFallbackTimeoutMs: number;
   llmContextLines: number;
   llmRerankMaxCandidates: number;
-  llmLearningEnabled: boolean;
-  llmLearningLogPath: string;
 };
