@@ -91,7 +91,8 @@ export class CloudLlmProvider implements LlmProvider {
       if (!choices || choices.length < 2) return [];
 
       const prefixChoice = choices.find((c) => c.index === 0);
-      const prefixTokenCount = prefixChoice?.logprobs?.tokens?.length ?? 0;
+      const prefixAllTokens = prefixChoice?.logprobs?.tokens?.length ?? 0;
+      const prefixTokenCount = Math.max(0, prefixAllTokens - 1);
 
       const scored: ScoredCandidate[] = [];
       for (let i = 0; i < req.candidates.length; i++) {
@@ -99,13 +100,13 @@ export class CloudLlmProvider implements LlmProvider {
         if (!choice?.logprobs) continue;
 
         const { token_logprobs } = choice.logprobs;
-        const totalTokens = token_logprobs.length;
+        const promptTokens = token_logprobs.length - 1;
 
         let sum = 0;
         let count = 0;
-        for (let j = prefixTokenCount; j < totalTokens; j++) {
+        for (let j = prefixTokenCount; j < promptTokens; j++) {
           const lp = token_logprobs[j];
-          if (lp !== null) {
+          if (lp !== null && lp !== -Infinity) {
             sum += lp;
             count++;
           }

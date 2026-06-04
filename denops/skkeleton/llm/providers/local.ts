@@ -93,9 +93,11 @@ export class LocalLlmProvider implements LlmProvider {
 
       if (!choices || choices.length < 2) return [];
 
-      // choices[0] = prefix only → prefixのトークン数を取得
+      // choices[0] = prefix only → prefixのプロンプトトークン数を取得
+      // max_tokens:0 でも1トークン生成されるため、末尾1つを除外する
       const prefixChoice = choices.find((c) => c.index === 0);
-      const prefixTokenCount = prefixChoice?.logprobs?.tokens?.length ?? 0;
+      const prefixAllTokens = prefixChoice?.logprobs?.tokens?.length ?? 0;
+      const prefixTokenCount = Math.max(0, prefixAllTokens - 1);
 
       // 各候補のスコアを算出
       const scored: ScoredCandidate[] = [];
@@ -104,17 +106,17 @@ export class LocalLlmProvider implements LlmProvider {
         if (!choice?.logprobs) continue;
 
         const { token_logprobs } = choice.logprobs;
-        const totalTokens = token_logprobs.length;
+        // 末尾1トークン（生成分）を除外
+        const promptTokens = token_logprobs.length - 1;
 
-        // candidate部分 = prefixTokenCount から (totalTokens - afterTokens) まで
-        // afterTokensの正確な計算は難しいため、
-        // prefix部分のlogprobsを除いた全体からcontextAfter部分を推定する
-        // 簡易方式: prefixTokenCount以降のlogprobsで、nullでないものを合計
+        // candidate部分 = prefixTokenCount から promptTokens まで
+        // contextAfterを含むため正確にはcandidate部分だけではないが、
+        // 全候補で同じcontextAfterなので相対順序は正しい
         let sum = 0;
         let count = 0;
-        for (let j = prefixTokenCount; j < totalTokens; j++) {
+        for (let j = prefixTokenCount; j < promptTokens; j++) {
           const lp = token_logprobs[j];
-          if (lp !== null) {
+          if (lp !== null && lp !== -Infinity) {
             sum += lp;
             count++;
           }
