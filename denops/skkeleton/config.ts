@@ -1,6 +1,9 @@
 import { getKanaTable, loadKanaTableFiles } from "./kana.ts";
 import { ConfigOptions, Encode, Encoding } from "./types.ts";
 import { homeExpand } from "./util.ts";
+import { setLlmProvider } from "./store.ts";
+import { LocalLlmProvider } from "./llm/providers/local.ts";
+import { CloudLlmProvider } from "./llm/providers/cloud.ts";
 
 import { ensure } from "@core/unknownutil/ensure";
 import { is } from "@core/unknownutil/is";
@@ -202,4 +205,26 @@ export async function setConfig(
   await normalize(denops);
 
   await loadKanaTableFiles(await Promise.all(config.globalKanaTableFiles));
+
+  // LLM プロバイダの初期化
+  if (config.llmEnabled) {
+    const providerConfig = {
+      type: config.llmProvider,
+      endpoint: config.llmEndpoint,
+      apiKey: config.llmApiKey,
+      model: config.llmModel,
+      timeoutMs: config.llmTimeoutMs,
+      fallbackTimeoutMs: config.llmFallbackTimeoutMs,
+    };
+    const provider = config.llmProvider === "cloud"
+      ? new CloudLlmProvider(providerConfig)
+      : new LocalLlmProvider(providerConfig);
+    setLlmProvider(provider);
+    if (config.debug) {
+      const healthy = await provider.healthCheck();
+      console.log(`skkeleton: LLM provider "${provider.name}" initialized (healthy=${healthy})`);
+    }
+  } else {
+    setLlmProvider(null);
+  }
 }
