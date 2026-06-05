@@ -16,22 +16,10 @@ type ChatCompletionResponse = {
   }>;
 };
 
-type CompletionChoice = {
-  index: number;
-  logprobs?: {
-    tokens: string[];
-    token_logprobs: (number | null)[];
-  };
-};
-
-type CompletionResponse = {
-  choices: CompletionChoice[];
-};
-
 /**
  * ローカル LLM プロバイダ（llama.cpp / OpenAI 互換 API）
  *
- * F2: /v1/completions + logprobs でバッチスコアリング
+ * F2: /v1/chat/completions で文脈に基づく候補リランキング
  * F1: /v1/chat/completions でかな→漢字候補を生成
  */
 export class LocalLlmProvider implements LlmProvider {
@@ -49,93 +37,42 @@ export class LocalLlmProvider implements LlmProvider {
   }
 
   /**
-   * F2: logprobsバッチスコアリング
-   * 全候補を1リクエストで評価し、スコア降順にソートして返す。
+   * F2: Chat Completionによる候補リランキング
+   * 文脈に最も適した候補をLLMに選ばせ、その候補を先頭に並べ替える。
    */
   async scoreCandidates(req: LlmScoreRequest): Promise<ScoredCandidate[]> {
     if (req.candidates.length === 0) return [];
 
-    // 各候補をコンテキストに埋め込んだプロンプトを構築
-    const prompts = req.candidates.map(
-      (c) => `${req.contextBefore}${c}${req.contextAfter}`,
-    );
-
-    // contextBeforeのみのプロンプト（トークン数のベースライン計測用）
-    const prefixPrompt = req.contextBefore;
+    const context = req.contextBefore + "___" + req.contextAfter;
+    const candidateList = req.candidates
+      .map((c, i) => `${i + 1}. ${c}`)
+      .join("\n");
 
     try {
-      // バッチリクエスト: 全候補 + prefix を1リクエストで投げる
-      const allPrompts = [prefixPrompt, ...prompts];
-      const body = JSON.stringify({
-        model: this.#model,
-        prompt: allPrompts,
-        max_tokens: 0,
-        echo: true,
-        logprobs: 1,
-      });
-
-      const resp = await deadline(
-        fetch(`${this.#endpoint}/v1/completions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        }),
+      const content = await this.#chatCompletion(
+        [
+          {
+            role: "system",
+            content:
+              "日本語かな漢字変換のアシスタントです。文脈に最も適した候補の番号を1つだけ出力してください。",
+          },
+          {
+            role: "user",
+            content: `文脈: ${context}\nよみ: ${req.word}\n${candidateList}`,
+          },
+        ],
         this.#timeoutMs,
       );
 
-      if (!resp.ok) {
-        await resp.body?.cancel();
-        return [];
-      }
+      const bestIndex = parseBestIndex(content, req.candidates.length);
+      if (bestIndex < 0) return [];
 
-      const json = await resp.json() as CompletionResponse;
-      const choices = json.choices;
-
-      if (!choices || choices.length < 2) return [];
-
-      // choices[0] = prefix only → prefixのプロンプトトークン数を取得
-      // max_tokens:0 でも1トークン生成されるため、末尾1つを除外する
-      const prefixChoice = choices.find((c) => c.index === 0);
-      const prefixAllTokens = prefixChoice?.logprobs?.tokens?.length ?? 0;
-      const prefixTokenCount = Math.max(0, prefixAllTokens - 1);
-
-      // 各候補のスコアを算出
-      const scored: ScoredCandidate[] = [];
-      for (let i = 0; i < req.candidates.length; i++) {
-        const choice = choices.find((c) => c.index === i + 1);
-        if (!choice?.logprobs) continue;
-
-        const { token_logprobs } = choice.logprobs;
-        // 末尾1トークン（生成分）を除外
-        const promptTokens = token_logprobs.length - 1;
-
-        // candidate部分 = prefixTokenCount から promptTokens まで
-        // contextAfterを含むため正確にはcandidate部分だけではないが、
-        // 全候補で同じcontextAfterなので相対順序は正しい
-        let sum = 0;
-        let count = 0;
-        for (let j = prefixTokenCount; j < promptTokens; j++) {
-          const lp = token_logprobs[j];
-          if (lp !== null && lp !== -Infinity) {
-            sum += lp;
-            count++;
-          }
-        }
-
-        // contextAfterを含むため正確にはcandidate部分だけではないが、
-        // 全候補で同じcontextAfterなので相対順序は正しい
-        scored.push({
-          value: req.candidates[i],
-          logprobSum: sum,
-          logprobAvg: count > 0 ? sum / count : -Infinity,
-        });
-      }
-
-      // スコア降順にソート（logprobSumが大きいほど良い）
-      scored.sort((a, b) => b.logprobSum - a.logprobSum);
-      return scored;
+      return req.candidates.map((c, i) => ({
+        value: c,
+        logprobSum: i === bestIndex ? 0 : -(i < bestIndex ? i + 1 : i),
+        logprobAvg: i === bestIndex ? 0 : -1,
+      })).sort((a, b) => b.logprobSum - a.logprobSum);
     } catch {
-      // タイムアウトやネットワークエラー時は空配列（辞書順にフォールバック）
       return [];
     }
   }
@@ -149,6 +86,8 @@ export class LocalLlmProvider implements LlmProvider {
       const content = await this.#chatCompletion(
         [{ role: "user", content: prompt }],
         this.#fallbackTimeoutMs,
+        100,
+        0.3,
       );
       return parseGenerateResponse(content);
     } catch {
@@ -169,12 +108,17 @@ export class LocalLlmProvider implements LlmProvider {
     }
   }
 
-  async #chatCompletion(messages: ChatMessage[], timeoutMs: number): Promise<string> {
+  async #chatCompletion(
+    messages: ChatMessage[],
+    timeoutMs: number,
+    maxTokens = 2,
+    temperature = 0,
+  ): Promise<string> {
     const body = JSON.stringify({
       model: this.#model,
       messages,
-      max_tokens: 100,
-      temperature: 0.3,
+      max_tokens: maxTokens,
+      temperature,
     });
 
     const resp = await deadline(
@@ -194,4 +138,16 @@ export class LocalLlmProvider implements LlmProvider {
     const json = await resp.json() as ChatCompletionResponse;
     return json.choices?.[0]?.message?.content ?? "";
   }
+}
+
+/**
+ * LLMレスポンスから最良候補のインデックス（0-based）を抽出する。
+ * "1" "1." "2" などの形式を想定。解析失敗時は -1。
+ */
+function parseBestIndex(content: string, maxCandidates: number): number {
+  const match = content.trim().match(/^(\d+)/);
+  if (!match) return -1;
+  const num = parseInt(match[1], 10);
+  if (num < 1 || num > maxCandidates) return -1;
+  return num - 1;
 }
