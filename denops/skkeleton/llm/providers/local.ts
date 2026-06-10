@@ -98,7 +98,10 @@ export class LocalLlmProvider implements LlmProvider {
   async healthCheck(): Promise<boolean> {
     try {
       const resp = await deadline(
-        fetch(`${this.#endpoint}/v1/models`),
+        fetch(`${this.#endpoint}/v1/models`, {
+          // タイムアウト時に接続自体を中断してリークを防ぐ
+          signal: AbortSignal.timeout(this.#timeoutMs),
+        }),
         this.#timeoutMs,
       );
       await resp.body?.cancel();
@@ -126,6 +129,8 @@ export class LocalLlmProvider implements LlmProvider {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
+        // タイムアウト時に接続自体を中断してリークを防ぐ
+        signal: AbortSignal.timeout(timeoutMs),
       }),
       timeoutMs,
     );

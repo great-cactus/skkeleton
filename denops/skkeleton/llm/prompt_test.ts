@@ -1,10 +1,5 @@
 import { assertEquals } from "@std/assert";
-import {
-  buildGeneratePrompt,
-  buildRerankPrompt,
-  parseGenerateResponse,
-  parseRerankResponse,
-} from "./prompt.ts";
+import { buildGeneratePrompt, parseGenerateResponse } from "./prompt.ts";
 
 Deno.test("buildGeneratePrompt - with full context", () => {
   const prompt = buildGeneratePrompt({
@@ -18,7 +13,7 @@ Deno.test("buildGeneratePrompt - with full context", () => {
   assertEquals(prompt.includes("かがく"), true);
   assertEquals(prompt.includes("有機化合物の"), true);
   assertEquals(prompt.includes("反応において"), true);
-  assertEquals(prompt.includes("5 candidates"), true);
+  assertEquals(prompt.includes("最大5件"), true);
 });
 
 Deno.test("buildGeneratePrompt - without context", () => {
@@ -31,23 +26,8 @@ Deno.test("buildGeneratePrompt - without context", () => {
 
   assertEquals(prompt.includes("てすと"), true);
   // コンテキストのセクションヘッダが出ないこと
-  assertEquals(prompt.includes("Context before"), false);
-  assertEquals(prompt.includes("Context after"), false);
-});
-
-Deno.test("buildRerankPrompt - includes all candidates", () => {
-  const prompt = buildRerankPrompt({
-    word: "かがく",
-    type: "okurinasi",
-    candidates: ["科学", "化学", "架空"],
-    contextBefore: "有機化合物の",
-    contextAfter: "反応において",
-  });
-
-  assertEquals(prompt.includes("1. 科学"), true);
-  assertEquals(prompt.includes("2. 化学"), true);
-  assertEquals(prompt.includes("3. 架空"), true);
-  assertEquals(prompt.includes("有機化合物の"), true);
+  assertEquals(prompt.includes("カーソル前の文脈"), false);
+  assertEquals(prompt.includes("カーソル後の文脈"), false);
 });
 
 Deno.test("parseGenerateResponse - plain list", () => {
@@ -81,52 +61,4 @@ Deno.test("parseGenerateResponse - truncates to 5", () => {
     "a\nb\nc\nd\ne\nf\ng",
   );
   assertEquals(candidates.length, 5);
-});
-
-Deno.test("parseRerankResponse - normal reorder", () => {
-  const result = parseRerankResponse(
-    "2,1,3",
-    ["科学", "化学", "架空"],
-  );
-  assertEquals(result, ["化学", "科学", "架空"]);
-});
-
-Deno.test("parseRerankResponse - space separated", () => {
-  const result = parseRerankResponse(
-    "3 1 2",
-    ["科学", "化学", "架空"],
-  );
-  assertEquals(result, ["架空", "科学", "化学"]);
-});
-
-Deno.test("parseRerankResponse - partial response appends missing", () => {
-  const result = parseRerankResponse(
-    "2",
-    ["科学", "化学", "架空"],
-  );
-  assertEquals(result, ["化学", "科学", "架空"]);
-});
-
-Deno.test("parseRerankResponse - invalid indices ignored", () => {
-  const result = parseRerankResponse(
-    "2,99,1",
-    ["科学", "化学", "架空"],
-  );
-  assertEquals(result, ["化学", "科学", "架空"]);
-});
-
-Deno.test("parseRerankResponse - duplicate indices deduplicated", () => {
-  const result = parseRerankResponse(
-    "2,2,1,3",
-    ["科学", "化学", "架空"],
-  );
-  assertEquals(result, ["化学", "科学", "架空"]);
-});
-
-Deno.test("parseRerankResponse - garbage input returns original order", () => {
-  const result = parseRerankResponse(
-    "これは無効な出力です",
-    ["科学", "化学", "架空"],
-  );
-  assertEquals(result, ["科学", "化学", "架空"]);
 });

@@ -24,6 +24,7 @@ test({
       word: "",
       candidates: [],
       candidateIndex: -1,
+      llmCandidateIndices: new Set<number>(),
     };
     const context = currentContext.get();
     context.state = state;
@@ -53,6 +54,7 @@ test({
       word: "",
       candidates: [],
       candidateIndex: -1,
+      llmCandidateIndices: new Set<number>(),
     };
     const context = currentContext.get();
     context.state = state;

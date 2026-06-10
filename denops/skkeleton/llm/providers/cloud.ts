@@ -101,6 +101,8 @@ export class CloudLlmProvider implements LlmProvider {
           headers: {
             "Authorization": `Bearer ${this.#apiKey}`,
           },
+          // タイムアウト時に接続自体を中断してリークを防ぐ
+          signal: AbortSignal.timeout(this.#timeoutMs),
         }),
         this.#timeoutMs,
       );
@@ -132,6 +134,8 @@ export class CloudLlmProvider implements LlmProvider {
           "Authorization": `Bearer ${this.#apiKey}`,
         },
         body,
+        // タイムアウト時に接続自体を中断してリークを防ぐ
+        signal: AbortSignal.timeout(timeoutMs),
       }),
       timeoutMs,
     );

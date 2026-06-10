@@ -83,44 +83,25 @@ Deno.test("LocalLlmProvider - generateCandidates returns empty on error", async 
   }
 });
 
-Deno.test("LocalLlmProvider - scoreCandidates scores and sorts by logprobSum", async () => {
-  // Mock /v1/completions response with batch logprobs
-  // choices[0] = prefix only, choices[1..N] = candidates with context
+Deno.test("LocalLlmProvider - scoreCandidates reranks by chat-selected index", async () => {
+  // Chat completion 方式: LLM が最適候補の番号を返し、その候補を先頭に並べ替える
   const mock = createMockServer(async (req) => {
     const url = new URL(req.url);
-    if (url.pathname === "/v1/models") {
-      return new Response(JSON.stringify({ data: [] }));
+    if (url.pathname !== "/v1/chat/completions") {
+      return new Response("not found", { status: 404 });
     }
-    // /v1/completions
+    const body = await req.json();
+    const user = (body.messages as Array<{ role: string; content: string }>)
+      .find((m) => m.role === "user");
+    // user メッセージに番号付き候補リストと読みが含まれること
+    if (
+      !user || !user.content.includes("1. 科学") ||
+      !user.content.includes("2. 化学") || !user.content.includes("かがく")
+    ) {
+      return new Response("bad request", { status: 400 });
+    }
     return new Response(
-      JSON.stringify({
-        choices: [
-          // index 0: prefix only ("有機化合物の") — 3 tokens
-          {
-            index: 0,
-            logprobs: {
-              tokens: ["有機", "化合", "物の"],
-              token_logprobs: [-1.0, -1.5, -0.8],
-            },
-          },
-          // index 1: "有機化合物の科学反応において" — candidate "科学"
-          {
-            index: 1,
-            logprobs: {
-              tokens: ["有機", "化合", "物の", "科学", "反応", "において"],
-              token_logprobs: [-1.0, -1.5, -0.8, -3.0, -1.2, -0.5],
-            },
-          },
-          // index 2: "有機化合物の化学反応において" — candidate "化学" (better score)
-          {
-            index: 2,
-            logprobs: {
-              tokens: ["有機", "化合", "物の", "化学", "反応", "において"],
-              token_logprobs: [-1.0, -1.5, -0.8, -0.5, -1.0, -0.3],
-            },
-          },
-        ],
-      }),
+      JSON.stringify({ choices: [{ message: { content: "2" } }] }),
       { headers: { "Content-Type": "application/json" } },
     );
   });
@@ -145,10 +126,9 @@ Deno.test("LocalLlmProvider - scoreCandidates scores and sorts by logprobSum", a
     });
 
     assertEquals(result.length, 2);
-    // 化学 has better logprob (-0.5 + -1.0 + -0.3 = -1.8) vs 科学 (-3.0 + -1.2 + -0.5 = -4.7)
+    // LLM が "2"（化学）を選んだので化学が先頭になる
     assertEquals(result[0].value, "化学");
     assertEquals(result[1].value, "科学");
-    // Verify logprobSum ordering
     assertEquals(result[0].logprobSum > result[1].logprobSum, true);
   } finally {
     await mock.close();
