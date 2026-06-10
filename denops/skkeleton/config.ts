@@ -4,6 +4,7 @@ import { homeExpand } from "./util.ts";
 import { setLlmProvider } from "./store.ts";
 import { LocalLlmProvider } from "./llm/providers/local.ts";
 import { CloudLlmProvider } from "./llm/providers/cloud.ts";
+import { ZenzLlmProvider } from "./llm/providers/zenz.ts";
 
 import { ensure } from "@core/unknownutil/ensure";
 import { is } from "@core/unknownutil/is";
@@ -135,10 +136,10 @@ const validators: Validators = {
   userDictionary: (x) => ensure(x, is.String),
   // LLM validators
   llmEnabled: (x: unknown) => ensure(x, is.Boolean),
-  llmProvider: (x: unknown): "local" | "cloud" => {
+  llmProvider: (x: unknown): "local" | "cloud" | "zenz" => {
     const v = ensure(x, is.String);
-    if (v !== "local" && v !== "cloud") {
-      throw TypeError("llmProvider must be 'local' or 'cloud'");
+    if (v !== "local" && v !== "cloud" && v !== "zenz") {
+      throw TypeError("llmProvider must be 'local', 'cloud' or 'zenz'");
     }
     return v;
   },
@@ -218,6 +219,8 @@ export async function setConfig(
     };
     const provider = config.llmProvider === "cloud"
       ? new CloudLlmProvider(providerConfig)
+      : config.llmProvider === "zenz"
+      ? new ZenzLlmProvider(providerConfig)
       : new LocalLlmProvider(providerConfig);
     setLlmProvider(provider);
     if (config.debug) {

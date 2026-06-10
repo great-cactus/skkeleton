@@ -59,7 +59,7 @@ export type ConfigOptions = {
   userDictionary: string;
   // LLM integration options
   llmEnabled: boolean;
-  llmProvider: "local" | "cloud";
+  llmProvider: "local" | "cloud" | "zenz";
   llmEndpoint: string;
   llmApiKey: string;
   llmModel: string;

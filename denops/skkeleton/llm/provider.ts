@@ -28,7 +28,7 @@ export interface LlmProvider {
 /** LLM プロバイダの設定 */
 export type LlmProviderConfig = {
   /** プロバイダ種別 */
-  type: "local" | "cloud";
+  type: "local" | "cloud" | "zenz";
   /** API エンドポイント URL */
   endpoint: string;
   /** API キー（クラウド使用時） */

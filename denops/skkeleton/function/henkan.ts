@@ -82,6 +82,10 @@ export async function henkanFirst(context: Context, key: string) {
         candidates: toScore,
         contextBefore: ctx.before,
         contextAfter: ctx.after,
+        kanaReading: state.mode === "okuriari"
+          ? state.henkanFeed + state.okuriFeed
+          : state.henkanFeed,
+        okuriKana: state.mode === "okuriari" ? state.okuriFeed : "",
       });
       if (scored.length > 0) {
         const reranked = scored.map((s) => s.value);
@@ -104,6 +108,10 @@ export async function henkanFirst(context: Context, key: string) {
         type: state.mode,
         contextBefore: ctx.before,
         contextAfter: ctx.after,
+        kanaReading: state.mode === "okuriari"
+          ? state.henkanFeed + state.okuriFeed
+          : state.henkanFeed,
+        okuriKana: state.mode === "okuriari" ? state.okuriFeed : "",
       });
       applyLlmFallbackCandidates(state, llmCandidates);
     } catch {
