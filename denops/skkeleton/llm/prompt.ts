@@ -5,28 +5,28 @@ import type { LlmGenerateRequest } from "./types.ts";
  */
 export function buildGeneratePrompt(req: LlmGenerateRequest): string {
   const lines: string[] = [
-    "You are a Japanese kana-to-kanji converter.",
-    "Given the surrounding context and a hiragana string, output the most likely kanji conversion candidates.",
+    "かな漢字変換器として動作してください。",
+    "前後の文脈とひらがな文字列から、最も適切な漢字変換候補を出力してください。",
     "",
   ];
 
   if (req.contextBefore) {
-    lines.push("Context before cursor:");
+    lines.push("カーソル前の文脈:");
     lines.push(req.contextBefore);
     lines.push("");
   }
 
-  lines.push(`Hiragana to convert: ${req.word}`);
+  lines.push(`変換対象のひらがな: ${req.word}`);
 
   if (req.contextAfter) {
     lines.push("");
-    lines.push("Context after cursor:");
+    lines.push("カーソル後の文脈:");
     lines.push(req.contextAfter);
   }
 
   lines.push("");
   lines.push(
-    "Output up to 5 candidates, one per line, most likely first. Output only the kanji/kana text, nothing else.",
+    "候補を最大5件、1行に1件ずつ、可能性の高い順に出力してください。漢字・かなのテキストのみを出力し、それ以外は何も書かないでください。",
   );
 
   return lines.join("\n");
