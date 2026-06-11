@@ -123,7 +123,9 @@ export async function henkanFirst(context: Context, key: string) {
 }
 
 /**
- * バッファからカーソル前後のコンテキストを取得する
+ * バッファからカーソル前後のコンテキストを取得する。
+ * 現在行はカーソル位置で before/after に分割し、変換中のプレエディット
+ * （markerHenkan 以降の「▽はし」など）は before から取り除く。
  */
 async function fetchBufferContext(
   denops: Denops,
@@ -132,21 +134,60 @@ async function fetchBufferContext(
   try {
     const curLine = await fn.line(denops, ".") as number;
     const lastLine = await fn.line(denops, "$") as number;
+    // 文字単位のカーソル位置（マルチバイト安全）
+    const cursorCol = await denops.call("charcol", ".") as number;
     const startBefore = Math.max(1, curLine - lines);
     const endAfter = Math.min(lastLine, curLine + lines);
 
-    const beforeLines = await fn.getline(denops, startBefore, curLine) as string[];
+    const currentLine = await fn.getline(denops, ".") as string;
+    const beforeLines = curLine > startBefore
+      ? await fn.getline(denops, startBefore, curLine - 1) as string[]
+      : [];
     const afterLines = curLine < lastLine
       ? await fn.getline(denops, curLine + 1, endAfter) as string[]
       : [];
 
-    return {
-      before: beforeLines.join("\n"),
-      after: afterLines.join("\n"),
-    };
+    return extractBufferContext(
+      beforeLines,
+      currentLine,
+      cursorCol,
+      afterLines,
+      config.markerHenkan,
+    );
   } catch {
     return { before: "", after: "" };
   }
+}
+
+/**
+ * カーソル前後の文脈を組み立てる（fetchBufferContext の純粋部分）。
+ * @param beforeLines 現在行より前の行
+ * @param currentLine 現在行のテキスト
+ * @param cursorCol 文字単位のカーソル位置（1-based、挿入点）
+ * @param afterLines 現在行より後の行
+ * @param henkanMarker 変換マーカー（config.markerHenkan）。カーソル前の
+ *   テキスト末尾にあるマーカー以降（変換中のプレエディット）を取り除く
+ */
+export function extractBufferContext(
+  beforeLines: string[],
+  currentLine: string,
+  cursorCol: number,
+  afterLines: string[],
+  henkanMarker: string,
+): { before: string; after: string } {
+  const chars = [...currentLine];
+  let beforeCursor = chars.slice(0, Math.max(0, cursorCol - 1)).join("");
+  const afterCursor = chars.slice(Math.max(0, cursorCol - 1)).join("");
+  if (henkanMarker.length > 0) {
+    const idx = beforeCursor.lastIndexOf(henkanMarker);
+    if (idx >= 0) {
+      beforeCursor = beforeCursor.slice(0, idx);
+    }
+  }
+  return {
+    before: [...beforeLines, beforeCursor].join("\n"),
+    after: [afterCursor, ...afterLines].join("\n"),
+  };
 }
 
 export async function henkanForward(context: Context) {
