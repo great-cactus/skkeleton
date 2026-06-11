@@ -114,7 +114,10 @@ export class ZenzLlmProvider implements LlmProvider {
   ): Promise<ScoredCandidate[]> {
     const nPrefix = await this.#countTokens(prefix, this.#timeoutMs);
     const scored = await Promise.all(candidates.map(async (c) => {
-      const { sum, count } = await this.#scoreSuffix(prefix, c + okuri, nPrefix);
+      // SKK 辞書のアノテーション（"梯;梯子" の ; 以降）は表記ではないので
+      // スコア対象から除く。返す値は元の候補文字列のまま
+      const surface = c.replace(/;.*$/, "") + okuri;
+      const { sum, count } = await this.#scoreSuffix(prefix, surface, nPrefix);
       return {
         value: c,
         logprobSum: sum,

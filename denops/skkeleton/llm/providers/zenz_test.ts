@@ -151,6 +151,47 @@ Deno.test("ZenzLlmProvider - scoreCandidates scores surface form (okuriari)", as
   }
 });
 
+Deno.test("ZenzLlmProvider - scoreCandidates strips SKK annotations from surface", async () => {
+  const prompts: string[] = [];
+  const mock = createMockServer(async (req) => {
+    const url = new URL(req.url);
+    const body = await req.json();
+    if (url.pathname === "/tokenize") {
+      return Response.json({ tokens: [0, 1, 2] });
+    }
+    prompts.push(body.prompt as string);
+    return Response.json({
+      choices: [{ logprobs: { token_logprobs: [null, -1, -1, -1, -1] } }],
+      usage: { prompt_tokens: 5 },
+    });
+  });
+  await new Promise((r) => setTimeout(r, 50));
+
+  try {
+    const provider = makeProvider(mock.url);
+    const result = await provider.scoreCandidates({
+      word: "はし",
+      type: "okurinasi",
+      candidates: ["梯;梯子", "箸"],
+      contextBefore: "",
+      contextAfter: "",
+      kanaReading: "はし",
+      okuriKana: "",
+    });
+
+    // アノテーション（; 以降）はスコア対象の表層形から除かれる
+    assert(prompts.some((p) => p.endsWith("梯")));
+    assert(prompts.every((p) => !p.includes("梯子")));
+    // 返す値は元の候補文字列のまま
+    assertEquals(
+      new Set(result.map((r) => r.value)),
+      new Set(["梯;梯子", "箸"]),
+    );
+  } finally {
+    await mock.close();
+  }
+});
+
 Deno.test("ZenzLlmProvider - scoreCandidates returns empty on server error", async () => {
   const mock = createMockServer(() =>
     new Response("Internal Server Error", { status: 500 })
