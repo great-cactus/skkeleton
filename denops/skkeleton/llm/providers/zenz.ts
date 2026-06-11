@@ -19,6 +19,27 @@ const MARKER_RIGHT_CONTEXT = "\uee07";
 const LEFT_CONTEXT_MAX_CHARS = 80;
 const RIGHT_CONTEXT_MAX_CHARS = 40;
 
+// 文境界。zenz-small は文脈中に出現した字をコピーする傾向が強く、
+// 前の文に同音異義語の別表記があると局所文脈を圧倒してしまう
+// (実測: 「…箸/川をわたるのは」+ハシ → 連結だと箸:-0.02、現文のみだと橋が1位)。
+// このため文脈は変換中の文だけに絞る
+const SENTENCE_BREAK = /[。．！？!?\n]/;
+
+/** 最後の文境界より後ろ（変換中の文の冒頭からカーソルまで）を返す */
+export function lastSentence(s: string): string {
+  let idx = -1;
+  for (const m of s.matchAll(new RegExp(SENTENCE_BREAK, "g"))) {
+    idx = m.index!;
+  }
+  return idx >= 0 ? s.slice(idx + 1) : s;
+}
+
+/** 最初の文境界まで（境界文字を含む）を返す */
+export function firstSentence(s: string): string {
+  const m = s.match(SENTENCE_BREAK);
+  return m ? s.slice(0, m.index! + 1) : s;
+}
+
 type CompletionResponse = {
   choices?: Array<{
     text?: string;
@@ -45,20 +66,15 @@ export function hiraToKata(s: string): string {
 
 /**
  * zenz 形式の条件付けプレフィックスを構成する。
- * 文脈は改行を除去し、直近の文字数だけを使う。
+ * 文脈は変換中の文（左は最後の文境界以降、右は最初の文境界まで）に絞る。
  */
 export function buildZenzPrefix(
   contextBefore: string,
   contextAfter: string,
   yomiKana: string,
 ): string {
-  const left = contextBefore.replaceAll("\n", "").slice(
-    -LEFT_CONTEXT_MAX_CHARS,
-  );
-  const right = contextAfter.replaceAll("\n", "").slice(
-    0,
-    RIGHT_CONTEXT_MAX_CHARS,
-  );
+  const left = lastSentence(contextBefore).slice(-LEFT_CONTEXT_MAX_CHARS);
+  const right = firstSentence(contextAfter).slice(0, RIGHT_CONTEXT_MAX_CHARS);
   const rightPart = right ? MARKER_RIGHT_CONTEXT + right : "";
   return MARKER_LEFT_CONTEXT + left + rightPart +
     MARKER_INPUT + hiraToKata(yomiKana) + MARKER_OUTPUT;

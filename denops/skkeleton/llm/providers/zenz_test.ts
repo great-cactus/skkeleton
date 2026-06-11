@@ -1,5 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
-import { buildZenzPrefix, hiraToKata, ZenzLlmProvider } from "./zenz.ts";
+import {
+  buildZenzPrefix,
+  firstSentence,
+  hiraToKata,
+  lastSentence,
+  ZenzLlmProvider,
+} from "./zenz.ts";
 
 const MARKER_INPUT = "\uee00";
 const MARKER_OUTPUT = "\uee01";
@@ -54,15 +60,42 @@ Deno.test("buildZenzPrefix - markers and context placement", () => {
   );
 });
 
-Deno.test("buildZenzPrefix - strips newlines and truncates context", () => {
-  const left = "あ".repeat(100) + "\n" + "い".repeat(100);
-  const right = "う".repeat(100);
+Deno.test("buildZenzPrefix - keeps only the current sentence", () => {
+  // 前の行・前の文に出た表記（箸）へのコピーバイアスを断つため、
+  // 左文脈は最後の文境界以降だけを使う
+  assertEquals(
+    buildZenzPrefix("ラーメンを食べるときは箸\n川をわたるのは", "", "はし"),
+    `${MARKER_LEFT_CONTEXT}川をわたるのは${MARKER_INPUT}ハシ${MARKER_OUTPUT}`,
+  );
+  assertEquals(
+    buildZenzPrefix("今日は晴れだ。川をわたるのは", "", "はし"),
+    `${MARKER_LEFT_CONTEXT}川をわたるのは${MARKER_INPUT}ハシ${MARKER_OUTPUT}`,
+  );
+  // 右文脈は最初の文境界まで
+  assertEquals(
+    buildZenzPrefix("机の", "に置く。次の行は無視。", "はし"),
+    `${MARKER_LEFT_CONTEXT}机の${MARKER_RIGHT_CONTEXT}に置く。${MARKER_INPUT}ハシ${MARKER_OUTPUT}`,
+  );
+});
+
+Deno.test("buildZenzPrefix - truncates very long sentences", () => {
+  const left = "あ".repeat(200);
+  const right = "う".repeat(200);
   const prefix = buildZenzPrefix(left, right, "よみ");
-  assert(!prefix.includes("\n"));
-  // 左は末尾 80 文字、右は先頭 40 文字
-  assert(prefix.includes(MARKER_LEFT_CONTEXT + "い".repeat(80)));
-  assert(prefix.includes(MARKER_RIGHT_CONTEXT + "う".repeat(40)));
+  assert(prefix.includes(MARKER_LEFT_CONTEXT + "あ".repeat(80) + MARKER_RIGHT_CONTEXT));
+  assert(!prefix.includes("あ".repeat(81)));
+  assert(prefix.includes(MARKER_RIGHT_CONTEXT + "う".repeat(40) + MARKER_INPUT));
   assert(!prefix.includes("う".repeat(41)));
+});
+
+Deno.test("lastSentence / firstSentence", () => {
+  assertEquals(lastSentence("一文目。二文目"), "二文目");
+  assertEquals(lastSentence("改行\nあと"), "あと");
+  assertEquals(lastSentence("境界なし"), "境界なし");
+  assertEquals(lastSentence("文末。"), "");
+  assertEquals(firstSentence("ここまで。その後"), "ここまで。");
+  assertEquals(firstSentence("ここまで\nその後"), "ここまで\n");
+  assertEquals(firstSentence("境界なし"), "境界なし");
 });
 
 Deno.test("ZenzLlmProvider - scoreCandidates ranks by logprob sum", async () => {
