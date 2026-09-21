@@ -14,7 +14,13 @@ export class Source implements BaseSource {
   }
 }
 
+// Circuit breaker: after a failure, skip requests for a while so that
+// offline usage does not wait for the timeout on every conversion.
+const COOLDOWN_MS = 60_000;
+
 export class Dictionary implements BaseDictionary {
+  #blockedUntil = 0;
+
   async connect() {}
   async getHenkanResult(_type: HenkanType, word: string): Promise<string[]> {
     // It should not work for "okuriari".
@@ -25,6 +31,10 @@ export class Dictionary implements BaseDictionary {
     return Promise.resolve([]);
   }
   private async getMidashis(prefix: string): Promise<string[]> {
+    if (Date.now() < this.#blockedUntil) {
+      return [];
+    }
+
     // Get midashis from prefix
     const params = new URLSearchParams({
       langpair: "ja-Hira|ja",
@@ -45,6 +55,7 @@ export class Dictionary implements BaseDictionary {
       const respJson = await resp.json();
       return respJson[0][1];
     } catch (e) {
+      this.#blockedUntil = Date.now() + COOLDOWN_MS;
       if (e instanceof DOMException) {
         // Ignore timeout error
       } else if (config.debug) {
