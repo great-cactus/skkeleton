@@ -14,6 +14,7 @@ export const config: Omit<ConfigOptions, "globalDictionaries"> & {
   globalDictionaries: [string, string][];
 } = {
   acceptIllegalResult: false,
+  completionBackend: "native",
   completionRankFile: "",
   databasePath: "",
   debug: false,
@@ -37,6 +38,7 @@ export const config: Omit<ConfigOptions, "globalDictionaries"> & {
   skkServerPort: 1178,
   skkServerReqEnc: "euc-jp",
   skkServerResEnc: "euc-jp",
+  skkServerTimeout: 5000,
   sources: ["skk_dictionary"],
   userDictionary: "~/.skkeleton",
   // LLM defaults (disabled by default)
@@ -57,7 +59,7 @@ type Validators = {
 };
 
 function ensureEncoding(x: unknown): Encoding {
-  if (is.String(x) && x in Encode) {
+  if (is.String(x) && Object.hasOwn(Encode, x)) {
     return x as Encoding;
   }
   throw TypeError(`${x} is invalid encoding`);
@@ -65,6 +67,7 @@ function ensureEncoding(x: unknown): Encoding {
 
 const validators: Validators = {
   acceptIllegalResult: (x) => ensure(x, is.Boolean),
+  completionBackend: (x) => ensure(x, is.String),
   completionRankFile: (x) => ensure(x, is.String),
   databasePath: (x) => ensure(x, is.String),
   debug: (x) => ensure(x, is.Boolean),
@@ -115,8 +118,13 @@ const validators: Validators = {
   registerConvertResult: (x) => ensure(x, is.Boolean),
   selectCandidateKeys: (x) => {
     const keys = ensure(x, is.String);
-    if (keys.length !== 7) {
-      throw TypeError("selectCandidateKeys.length !== 7");
+    if (
+      keys.length !== 7 ||
+      new Set(Array.from(keys)).size !== 7
+    ) {
+      throw TypeError(
+        "selectCandidateKeys must contain 7 distinct characters",
+      );
     }
     return keys;
   },
@@ -126,6 +134,7 @@ const validators: Validators = {
   skkServerPort: (x) => ensure(x, is.Number),
   skkServerReqEnc: ensureEncoding,
   skkServerResEnc: ensureEncoding,
+  skkServerTimeout: (x) => ensure(x, is.Number),
   sources: (x) => ensure(x, is.ArrayOf(is.String)),
   useGoogleJapaneseInput: () => {
     throw '`useGoogleJapaneseInput` is removed. Please use `sources` with "google_japanese_input"';
@@ -187,12 +196,12 @@ export async function setConfig(
   denops: Denops,
 ) {
   const cfg = config as Record<string, unknown>;
-  const val = validators as Record<string, (x: unknown) => void>;
+  const val = validators as Record<string, (x: unknown) => unknown>;
   if (config.debug) {
     console.log("skkeleton: new config");
     console.log(newConfig);
   }
-  for (const k in newConfig) {
+  for (const k of Object.keys(newConfig)) {
     try {
       if (val[k]) {
         cfg[k] = val[k](newConfig[k]);

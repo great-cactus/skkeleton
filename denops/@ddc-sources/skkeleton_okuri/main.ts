@@ -1,5 +1,4 @@
-import { getOkuriStr } from "../../skkeleton/okuri.ts";
-import { okuriSplits } from "./okurisplits.ts";
+import { getOkuriStr, okuriSplits } from "../../skkeleton/okuri.ts";
 
 import {
   BaseSource,
@@ -15,6 +14,7 @@ type CompletionMetadata = {
   skkeleton: {
     midasi: string;
     word: string;
+    okuri: string;
   };
 };
 
@@ -42,27 +42,46 @@ export class Source extends BaseSource<Never> {
       ),
     );
 
-    const chunks = okuriSplits(kana ?? "");
+    const chunks = okuriSplits(kana);
+    if (chunks.length === 0) {
+      return [];
+    }
+    const midashis = chunks.map(([word, okuri]) => getOkuriStr(word, okuri));
+    const results = await args.denops.dispatch(
+      "skkeleton",
+      "getCandidatesBatch",
+      midashis,
+      "okuriari",
+    ) as Record<string, string[]>;
+
+    function splitCandidate(candidate: string): [string, string] {
+      const separator = candidate.indexOf(";");
+      if (separator === -1) {
+        return [candidate, ""];
+      }
+      return [
+        candidate.slice(0, separator),
+        candidate.slice(separator + 1),
+      ];
+    }
+
     const candidates: Item<CompletionMetadata>[] = [];
     for (const [word, okuri] of chunks) {
       const midasi = getOkuriStr(word, okuri);
-      const cands = await args.denops.dispatch(
-        "skkeleton",
-        "getCandidates",
-        midasi,
-        "okuriari",
-      ) as string[] | undefined;
-      if (cands == null) {
+      const cands = results[midasi];
+      if (!cands) {
         continue;
       }
+
       for (const cand of cands) {
-        const candStrip = cand.replace(/;.*$/, "");
+        const [candStrip] = splitCandidate(cand);
         candidates.push({
           word: candStrip + okuri,
           user_data: {
             skkeleton: {
               midasi,
               word: cand,
+              okuri,
             },
           },
         });
@@ -74,12 +93,16 @@ export class Source extends BaseSource<Never> {
   override async onCompleteDone(
     args: OnCompleteDoneArguments<Never, CompletionMetadata>,
   ) {
+    const { midasi, word, okuri } = args.userData.skkeleton;
     await args.denops.dispatch(
       "skkeleton",
       "completeCallback",
-      args.userData.skkeleton.midasi,
-      args.userData.skkeleton.word,
+      midasi,
+      word,
       "okuriari",
+      // Note: the same string as the word of the item, which is what has been
+      //       inserted into the buffer
+      word.replace(/;.*$/, "") + okuri,
     );
   }
 
