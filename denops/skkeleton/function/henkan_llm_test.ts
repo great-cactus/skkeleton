@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1/equals";
+import { assertEquals } from "@std/assert";
 import { extractBufferContext } from "./henkan.ts";
 
 // --- extractBufferContext ---

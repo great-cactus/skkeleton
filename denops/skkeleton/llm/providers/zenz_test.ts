@@ -13,6 +13,7 @@ const MARKER_OUTPUT = "\uee01";
 const MARKER_LEFT_CONTEXT = "\uee02";
 const MARKER_TOPIC = "\uee04";
 const MARKER_RIGHT_CONTEXT = "\uee07";
+const EOS = "</s>";
 
 /** テスト用モック HTTP サーバ */
 function createMockServer(
@@ -159,7 +160,7 @@ Deno.test("ZenzLlmProvider - scoreCandidates ranks by logprob sum", async () => 
     }
     const prompt = body.prompt as string;
     const cand = Object.keys(logprobsByCandidate).find((c) =>
-      prompt.endsWith(c)
+      prompt.endsWith(c + EOS)
     );
     if (!cand) {
       return new Response("unexpected prompt", { status: 400 });
@@ -187,6 +188,51 @@ Deno.test("ZenzLlmProvider - scoreCandidates ranks by logprob sum", async () => 
     assertEquals(result.map((r) => r.value), ["化学", "科学", "価額"]);
     assertEquals(result[0].logprobSum, -1.0);
     assertEquals(result[0].logprobAvg, -0.5);
+  } finally {
+    await mock.close();
+  }
+});
+
+Deno.test("ZenzLlmProvider - scoreCandidates includes EOS to penalize truncated candidates", async () => {
+  // 「濃」は「濃い」と同じ尤度で始まるが、そこで終わる（EOS）確率が低い
+  const eosLogprob: Record<string, number> = { "濃": -20, "濃い": -0.01 };
+  const prompts: string[] = [];
+  const mock = createMockServer(async (req) => {
+    const url = new URL(req.url);
+    const body = await req.json();
+    if (url.pathname === "/tokenize") {
+      return Response.json({ tokens: [0, 1, 2] });
+    }
+    const prompt = body.prompt as string;
+    prompts.push(prompt);
+    const cand = Object.keys(eosLogprob).find((c) => prompt.endsWith(c + EOS));
+    if (!cand) {
+      return new Response("unexpected prompt", { status: 400 });
+    }
+    return Response.json({
+      choices: [{
+        logprobs: { token_logprobs: [null, -1, -1, -0.05, eosLogprob[cand]] },
+      }],
+      usage: { prompt_tokens: 5 },
+    });
+  });
+  await new Promise((r) => setTimeout(r, 50));
+
+  try {
+    const provider = makeProvider(mock.url);
+    const result = await provider.scoreCandidates({
+      word: "こい",
+      type: "okurinasi",
+      candidates: ["濃", "濃い"],
+      contextBefore: "このコーヒーは味が",
+      contextAfter: "。",
+      kanaReading: "こい",
+      okuriKana: "",
+    });
+
+    assertEquals(prompts.length, 2);
+    assertEquals(result.map((r) => r.value), ["濃い", "濃"]);
+    assertEquals(result[1].logprobSum, -20.05);
   } finally {
     await mock.close();
   }
@@ -221,8 +267,8 @@ Deno.test("ZenzLlmProvider - scoreCandidates scores surface form (okuriari)", as
     });
 
     // スコアリングは表層形（候補+送り仮名）で行い、返す値は語幹のまま
-    assert(prompts.some((p) => p.endsWith("上る")));
-    assert(prompts.some((p) => p.endsWith("登る")));
+    assert(prompts.some((p) => p.endsWith("上る" + EOS)));
+    assert(prompts.some((p) => p.endsWith("登る" + EOS)));
     assert(prompts.every((p) => p.includes(MARKER_INPUT + "ノボル")));
     assertEquals(new Set(result.map((r) => r.value)), new Set(["上", "登"]));
   } finally {
@@ -259,7 +305,7 @@ Deno.test("ZenzLlmProvider - scoreCandidates strips SKK annotations from surface
     });
 
     // アノテーション（; 以降）はスコア対象の表層形から除かれる
-    assert(prompts.some((p) => p.endsWith("梯")));
+    assert(prompts.some((p) => p.endsWith("梯" + EOS)));
     assert(prompts.every((p) => !p.includes("梯子")));
     // 返す値は元の候補文字列のまま
     assertEquals(
@@ -337,6 +383,28 @@ Deno.test("ZenzLlmProvider - generateCandidates strips okurigana", async () => {
   }
 });
 
+Deno.test("ZenzLlmProvider - generateCandidates drops the reading itself (okuriari)", async () => {
+  const mock = createMockServer((_req) =>
+    Response.json({ choices: [{ text: "はかる" }] })
+  );
+  await new Promise((r) => setTimeout(r, 50));
+
+  try {
+    const provider = makeProvider(mock.url);
+    const result = await provider.generateCandidates({
+      word: "はかr",
+      type: "okuriari",
+      contextBefore: "体重計で体重を",
+      contextAfter: "。",
+      kanaReading: "はかる",
+      okuriKana: "る",
+    });
+    assertEquals(result, []);
+  } finally {
+    await mock.close();
+  }
+});
+
 Deno.test("ZenzLlmProvider - F1 sends topic and previous sentences", async () => {
   let prompt = "";
   const mock = createMockServer(async (req) => {
@@ -409,9 +477,9 @@ Deno.test("ZenzLlmProvider - readingBaseline scores the reading itself", async (
     }
     const prompt = body.prompt as string;
     // 読み「ながい」が一番高く、次に「永井」
-    const lp = prompt.endsWith("ながい")
+    const lp = prompt.endsWith("ながい" + EOS)
       ? -0.1
-      : prompt.endsWith("永井")
+      : prompt.endsWith("永井" + EOS)
       ? -1
       : -5;
     return Response.json({

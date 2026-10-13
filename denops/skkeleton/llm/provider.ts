@@ -1,4 +1,8 @@
-import type { LlmGenerateRequest, LlmScoreRequest, ScoredCandidate } from "./types.ts";
+import type {
+  LlmGenerateRequest,
+  LlmScoreRequest,
+  ScoredCandidate,
+} from "./types.ts";
 
 /** LLM プロバイダの抽象インターフェース */
 export interface LlmProvider {

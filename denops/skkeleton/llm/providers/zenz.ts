@@ -14,6 +14,8 @@ const MARKER_OUTPUT = "\uee01";
 const MARKER_LEFT_CONTEXT = "\uee02";
 const MARKER_TOPIC = "\uee04";
 const MARKER_RIGHT_CONTEXT = "\uee07";
+// 出力の終端。採点に含めないと「濃い」の途中で切れた「濃」が「濃い」と同点になる
+const EOS = "</s>";
 
 // 条件（topic など）の文字数上限。AzooKey の ZenzPromptBuilder と同じく末尾を残す
 const CONDITION_MAX_CHARS = 25;
@@ -216,11 +218,12 @@ export class ZenzLlmProvider implements LlmProvider {
         this.#fallbackTimeoutMs,
       ) as CompletionResponse;
       let text = (json.choices?.[0]?.text ?? "").trim();
-      if (text === "") return [];
+      // 読みそのもの（かなのまま）は候補にしない
+      if (text === "" || text === kana) return [];
       if (okuri !== "" && text.endsWith(okuri)) {
         text = text.slice(0, -okuri.length);
       }
-      return text === "" || text === kana ? [] : [text];
+      return text === "" ? [] : [text];
     } catch {
       return [];
     }
@@ -252,8 +255,8 @@ export class ZenzLlmProvider implements LlmProvider {
   }
 
   /**
-   * prefix+suffix の echo+logprobs から suffix 部分の logprob 合計を求める。
-   * suffix のトークン範囲は [プレフィックストークン数, プロンプトトークン数)。
+   * prefix+suffix+EOS の echo+logprobs から suffix と EOS の logprob 合計を求める。
+   * 範囲は [プレフィックストークン数, プロンプトトークン数)。
    */
   async #scoreSuffix(
     prefix: string,
@@ -261,7 +264,7 @@ export class ZenzLlmProvider implements LlmProvider {
     nPrefix: number,
   ): Promise<{ sum: number; count: number }> {
     const json = await this.#post("/v1/completions", {
-      prompt: prefix + suffix,
+      prompt: prefix + suffix + EOS,
       max_tokens: 0,
       echo: true,
       logprobs: 1,

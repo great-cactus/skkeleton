@@ -1,6 +1,10 @@
 import { assertEquals } from "@std/assert";
 import type { LlmProvider } from "./provider.ts";
-import type { LlmGenerateRequest, LlmScoreRequest, ScoredCandidate } from "./types.ts";
+import type {
+  LlmGenerateRequest,
+  LlmScoreRequest,
+  ScoredCandidate,
+} from "./types.ts";
 
 /** テスト用モックプロバイダ */
 class MockLlmProvider implements LlmProvider {
@@ -21,18 +25,18 @@ class MockLlmProvider implements LlmProvider {
     this.#scoreResult = opts?.scoreResult ?? [];
   }
 
-  async scoreCandidates(_req: LlmScoreRequest): Promise<ScoredCandidate[]> {
+  scoreCandidates(_req: LlmScoreRequest): Promise<ScoredCandidate[]> {
     this.scoreCallCount++;
-    return this.#scoreResult;
+    return Promise.resolve(this.#scoreResult);
   }
 
-  async generateCandidates(_req: LlmGenerateRequest): Promise<string[]> {
+  generateCandidates(_req: LlmGenerateRequest): Promise<string[]> {
     this.generateCallCount++;
-    return this.#generateResult;
+    return Promise.resolve(this.#generateResult);
   }
 
-  async healthCheck(): Promise<boolean> {
-    return this.#healthy;
+  healthCheck(): Promise<boolean> {
+    return Promise.resolve(this.#healthy);
   }
 }
 
