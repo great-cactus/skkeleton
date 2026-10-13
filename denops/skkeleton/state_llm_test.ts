@@ -1,5 +1,5 @@
-import { assertEquals } from "jsr:@std/assert@1/equals";
-import { henkanStateToString, type HenkanState } from "./state.ts";
+import { assertEquals } from "@std/assert";
+import { type HenkanState, henkanStateToString } from "./state.ts";
 import { config } from "./config.ts";
 
 function makeHenkanState(overrides: Partial<HenkanState> = {}): HenkanState {

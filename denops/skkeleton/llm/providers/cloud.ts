@@ -1,5 +1,9 @@
 import type { LlmProvider, LlmProviderConfig } from "../provider.ts";
-import type { LlmGenerateRequest, LlmScoreRequest, ScoredCandidate } from "../types.ts";
+import type {
+  LlmGenerateRequest,
+  LlmScoreRequest,
+  ScoredCandidate,
+} from "../types.ts";
 import { buildGeneratePrompt, parseGenerateResponse } from "../prompt.ts";
 import { deadline } from "@std/async/deadline";
 

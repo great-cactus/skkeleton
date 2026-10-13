@@ -7,7 +7,12 @@ function createMockServer(
 ): { server: Deno.HttpServer; url: string; close: () => Promise<void> } {
   let port: number;
   const server = Deno.serve(
-    { port: 0, onListen: (addr) => { port = addr.port; } },
+    {
+      port: 0,
+      onListen: (addr) => {
+        port = addr.port;
+      },
+    },
     handler,
   );
 
