@@ -9,6 +9,8 @@
  * 任意の環境変数:
  * - SKKELETON_TOPIC_ENDPOINT / SKKELETON_TOPIC_MODEL / SKKELETON_TOPIC_API_KEY:
  *     topic を省略したケースで、話題をこの要約器（chat completions API）で作る
+ * - SKKELETON_EVAL_RERANK_K:
+ *     並べ替える件数（既定は llmRerankMaxCandidates の既定値）。件数ごとの速さを比べるのに使う
  * - SKKELETON_EVAL_JISYO / SKKELETON_EVAL_JISYO_ENCODING (既定 euc-jp):
  *     F2 の candidates をこの SKK 辞書から読み直し、F1 の読みが辞書に無いことを確かめる
  *
@@ -33,6 +35,11 @@ const endpoint = Deno.env.get("SKKELETON_ZENZ_ENDPOINT") ?? "";
 const topicEndpoint = Deno.env.get("SKKELETON_TOPIC_ENDPOINT") ?? "";
 const jisyoPath = Deno.env.get("SKKELETON_EVAL_JISYO") ?? "";
 const EVAL_TIMEOUT_MS = 10_000;
+
+const rerankK = Deno.env.get("SKKELETON_EVAL_RERANK_K");
+if (rerankK) {
+  config.llmRerankMaxCandidates = Number(rerankK);
+}
 
 const provider = new ZenzLlmProvider({
   type: "zenz",
