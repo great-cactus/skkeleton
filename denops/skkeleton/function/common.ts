@@ -124,6 +124,7 @@ export async function completionKakutei(
     word: midasi,
     candidates,
     candidateIndex,
+    llmCandidateIndices: new Set(),
     feed: "",
     // Note: the completion may have extended the reading which has been
     //       typed, so take it from the midasi of the candidate
