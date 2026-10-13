@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   buildZenzPrefix,
+  FALLBACK_LEFT_CONTEXT_MAX_CHARS,
   firstSentence,
   hiraToKata,
   lastSentence,
@@ -10,6 +11,7 @@ import {
 const MARKER_INPUT = "\uee00";
 const MARKER_OUTPUT = "\uee01";
 const MARKER_LEFT_CONTEXT = "\uee02";
+const MARKER_TOPIC = "\uee04";
 const MARKER_RIGHT_CONTEXT = "\uee07";
 
 /** テスト用モック HTTP サーバ */
@@ -18,7 +20,12 @@ function createMockServer(
 ): { server: Deno.HttpServer; url: string; close: () => Promise<void> } {
   let port: number;
   const server = Deno.serve(
-    { port: 0, onListen: (addr) => { port = addr.port; } },
+    {
+      port: 0,
+      onListen: (addr) => {
+        port = addr.port;
+      },
+    },
     handler,
   );
 
@@ -82,10 +89,49 @@ Deno.test("buildZenzPrefix - truncates very long sentences", () => {
   const left = "あ".repeat(200);
   const right = "う".repeat(200);
   const prefix = buildZenzPrefix(left, right, "よみ");
-  assert(prefix.includes(MARKER_LEFT_CONTEXT + "あ".repeat(80) + MARKER_RIGHT_CONTEXT));
+  assert(
+    prefix.includes(
+      MARKER_LEFT_CONTEXT + "あ".repeat(80) + MARKER_RIGHT_CONTEXT,
+    ),
+  );
   assert(!prefix.includes("あ".repeat(81)));
-  assert(prefix.includes(MARKER_RIGHT_CONTEXT + "う".repeat(40) + MARKER_INPUT));
+  assert(
+    prefix.includes(MARKER_RIGHT_CONTEXT + "う".repeat(40) + MARKER_INPUT),
+  );
   assert(!prefix.includes("う".repeat(41)));
+});
+
+Deno.test("buildZenzPrefix - topic condition goes first", () => {
+  assertEquals(
+    buildZenzPrefix("渡るのは", "", "はし", { topic: "川の散策" }),
+    `${MARKER_TOPIC}川の散策${MARKER_LEFT_CONTEXT}渡るのは${MARKER_INPUT}ハシ${MARKER_OUTPUT}`,
+  );
+  // 空白だけの topic は付けない
+  assertEquals(
+    buildZenzPrefix("渡るのは", "", "はし", { topic: "  " }),
+    `${MARKER_LEFT_CONTEXT}渡るのは${MARKER_INPUT}ハシ${MARKER_OUTPUT}`,
+  );
+  // 長い topic は末尾 25 文字だけ残す (AzooKey と同じ)
+  const long = "あ".repeat(5) + "い".repeat(25);
+  assert(
+    buildZenzPrefix("", "", "よみ", { topic: long })
+      .startsWith(MARKER_TOPIC + "い".repeat(25) + MARKER_LEFT_CONTEXT),
+  );
+});
+
+Deno.test("buildZenzPrefix - wideLeftContext keeps previous sentences", () => {
+  // F1 では前の文で定義された固有名詞を写せるよう、文境界で切らない
+  assertEquals(
+    buildZenzPrefix("新会社は角田精機という。\n次に", "", "つのだせいき", {
+      wideLeftContext: true,
+    }),
+    `${MARKER_LEFT_CONTEXT}新会社は角田精機という。次に${MARKER_INPUT}ツノダセイキ${MARKER_OUTPUT}`,
+  );
+  const prefix = buildZenzPrefix("あ".repeat(300), "", "よみ", {
+    wideLeftContext: true,
+  });
+  assert(prefix.includes("あ".repeat(FALLBACK_LEFT_CONTEXT_MAX_CHARS)));
+  assert(!prefix.includes("あ".repeat(FALLBACK_LEFT_CONTEXT_MAX_CHARS + 1)));
 });
 
 Deno.test("lastSentence / firstSentence", () => {
@@ -286,6 +332,69 @@ Deno.test("ZenzLlmProvider - generateCandidates strips okurigana", async () => {
       okuriKana: "る",
     });
     assertEquals(result, ["上"]);
+  } finally {
+    await mock.close();
+  }
+});
+
+Deno.test("ZenzLlmProvider - F1 sends topic and previous sentences", async () => {
+  let prompt = "";
+  const mock = createMockServer(async (req) => {
+    prompt = (await req.json()).prompt;
+    return Response.json({ choices: [{ text: "角田精機" }] });
+  });
+  await new Promise((r) => setTimeout(r, 50));
+
+  try {
+    const provider = makeProvider(mock.url);
+    await provider.generateCandidates({
+      word: "つのだせいき",
+      type: "okurinasi",
+      contextBefore: "新会社は角田精機という。来月から",
+      contextAfter: "が営業を始める。",
+      kanaReading: "つのだせいき",
+      topic: "新会社の設立",
+    });
+    assertEquals(
+      prompt,
+      `${MARKER_TOPIC}新会社の設立${MARKER_LEFT_CONTEXT}新会社は角田精機という。来月から${MARKER_RIGHT_CONTEXT}が営業を始める。${MARKER_INPUT}ツノダセイキ${MARKER_OUTPUT}`,
+    );
+  } finally {
+    await mock.close();
+  }
+});
+
+Deno.test("ZenzLlmProvider - F2 keeps sentence-limited context with topic", async () => {
+  const prompts: string[] = [];
+  const mock = createMockServer(async (req) => {
+    const url = new URL(req.url);
+    const body = await req.json();
+    if (url.pathname === "/tokenize") {
+      prompts.push(body.content);
+      return Response.json({ tokens: [0, 1, 2] });
+    }
+    return Response.json({
+      choices: [{ logprobs: { token_logprobs: [null, -1, -1, -1] } }],
+      usage: { prompt_tokens: 4 },
+    });
+  });
+  await new Promise((r) => setTimeout(r, 50));
+
+  try {
+    const provider = makeProvider(mock.url);
+    await provider.scoreCandidates({
+      word: "はし",
+      type: "okurinasi",
+      candidates: ["箸", "橋"],
+      contextBefore: "箸を置いた。川を渡るには",
+      contextAfter: "",
+      kanaReading: "はし",
+      topic: "川の散策",
+    });
+    assertEquals(
+      prompts[0],
+      `${MARKER_TOPIC}川の散策${MARKER_LEFT_CONTEXT}川を渡るには${MARKER_INPUT}ハシ${MARKER_OUTPUT}`,
+    );
   } finally {
     await mock.close();
   }

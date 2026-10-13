@@ -68,4 +68,9 @@ export type ConfigOptions = {
   llmFallbackTimeoutMs: number;
   llmContextLines: number;
   llmRerankMaxCandidates: number;
+  llmTopicEnabled: boolean;
+  llmTopicEndpoint: string;
+  llmTopicApiKey: string;
+  llmTopicModel: string;
+  llmTopicTimeoutMs: number;
 };

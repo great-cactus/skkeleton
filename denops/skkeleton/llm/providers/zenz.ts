@@ -7,17 +7,26 @@ import type {
 import { deadline } from "@std/async/deadline";
 
 // zenz (v3 系) かな漢字変換特化モデルの特殊マーカー
-// フォーマット: <left><right><yomi_katakana><output></s>
+// フォーマット: [<topic>]<left><right><yomi_katakana><output></s>
 // (右文脈マーカー  は v3.2 以降のみ。空のときは省略する)
 const MARKER_INPUT = "\uee00";
 const MARKER_OUTPUT = "\uee01";
 const MARKER_LEFT_CONTEXT = "\uee02";
+const MARKER_TOPIC = "\uee04";
 const MARKER_RIGHT_CONTEXT = "\uee07";
+
+// 条件（topic など）の文字数上限。AzooKey の ZenzPromptBuilder と同じく末尾を残す
+const CONDITION_MAX_CHARS = 25;
 
 // プレフィル時間を抑えるための文脈の文字数上限
 // (zenz-v3.2-small は CPU で 1000 tok/s 程度。文字レベルなので文字数 ≒ トークン数)
 const LEFT_CONTEXT_MAX_CHARS = 80;
 const RIGHT_CONTEXT_MAX_CHARS = 40;
+
+// F1 の左文脈の文字数上限。F1 は辞書に候補がないときに動くので、
+// 前の文に出た表記（文中で定義された固有名詞など）を写す傾向はむしろ必要になる。
+// このため F1 だけは文境界で切らず、複数の文を渡す
+export const FALLBACK_LEFT_CONTEXT_MAX_CHARS = 120;
 
 // 文境界。zenz-small は文脈中に出現した字をコピーする傾向が強く、
 // 前の文に同音異義語の別表記があると局所文脈を圧倒してしまう
@@ -57,26 +66,42 @@ export function hiraToKata(s: string): string {
   let out = "";
   for (const ch of s) {
     const cp = ch.codePointAt(0)!;
-    out += cp >= 0x3041 && cp <= 0x3096
-      ? String.fromCodePoint(cp + 0x60)
-      : ch;
+    out += cp >= 0x3041 && cp <= 0x3096 ? String.fromCodePoint(cp + 0x60) : ch;
   }
   return out;
 }
 
+export type ZenzPrefixOptions = {
+  /** 文章全体の話題（topic 条件として先頭に置く） */
+  topic?: string;
+  /**
+   * true のとき左文脈を文境界で切らず、改行を除いた直前の
+   * FALLBACK_LEFT_CONTEXT_MAX_CHARS 文字を使う（F1 用）
+   */
+  wideLeftContext?: boolean;
+};
+
 /**
  * zenz 形式の条件付けプレフィックスを構成する。
  * 文脈は変換中の文（左は最後の文境界以降、右は最初の文境界まで）に絞る。
+ * wideLeftContext のときだけ左文脈を複数の文に広げる。
  */
 export function buildZenzPrefix(
   contextBefore: string,
   contextAfter: string,
   yomiKana: string,
+  options: ZenzPrefixOptions = {},
 ): string {
-  const left = lastSentence(contextBefore).slice(-LEFT_CONTEXT_MAX_CHARS);
+  const left = options.wideLeftContext
+    ? contextBefore.replace(/\n/g, "").slice(-FALLBACK_LEFT_CONTEXT_MAX_CHARS)
+    : lastSentence(contextBefore).slice(-LEFT_CONTEXT_MAX_CHARS);
   const right = firstSentence(contextAfter).slice(0, RIGHT_CONTEXT_MAX_CHARS);
+  const topic = options.topic?.trim() ?? "";
+  const topicPart = topic
+    ? MARKER_TOPIC + topic.slice(-CONDITION_MAX_CHARS)
+    : "";
   const rightPart = right ? MARKER_RIGHT_CONTEXT + right : "";
-  return MARKER_LEFT_CONTEXT + left + rightPart +
+  return topicPart + MARKER_LEFT_CONTEXT + left + rightPart +
     MARKER_INPUT + hiraToKata(yomiKana) + MARKER_OUTPUT;
 }
 
@@ -86,7 +111,8 @@ export function buildZenzPrefix(
  * F2: /v1/completions の echo+logprobs で各候補の条件付き対数尤度
  *     logP(候補 | 文脈, 読み) を求めてリランキングする。
  *     指示追従を要しないため 0.1B 級のモデルで動作する。
- * F1: 同じ条件付けで greedy 生成し、最良の変換を 1 候補返す。
+ * F1: 同じ条件付け（ただし左文脈は複数の文）で greedy 生成し、
+ *     最良の変換を 1 候補返す。
  *
  * 想定サーバー: echo+logprobs 対応の llama-server + zenz-v3.2 系 GGUF
  */
@@ -111,7 +137,9 @@ export class ZenzLlmProvider implements LlmProvider {
 
     const kana = req.kanaReading ?? req.word;
     const okuri = req.okuriKana ?? "";
-    const prefix = buildZenzPrefix(req.contextBefore, req.contextAfter, kana);
+    const prefix = buildZenzPrefix(req.contextBefore, req.contextAfter, kana, {
+      topic: req.topic,
+    });
 
     try {
       return await deadline(
@@ -150,7 +178,10 @@ export class ZenzLlmProvider implements LlmProvider {
   async generateCandidates(req: LlmGenerateRequest): Promise<string[]> {
     const kana = req.kanaReading ?? req.word;
     const okuri = req.okuriKana ?? "";
-    const prefix = buildZenzPrefix(req.contextBefore, req.contextAfter, kana);
+    const prefix = buildZenzPrefix(req.contextBefore, req.contextAfter, kana, {
+      topic: req.topic,
+      wideLeftContext: true,
+    });
 
     try {
       const json = await deadline(

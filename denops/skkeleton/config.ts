@@ -5,6 +5,7 @@ import { setLlmProvider } from "./store.ts";
 import { LocalLlmProvider } from "./llm/providers/local.ts";
 import { CloudLlmProvider } from "./llm/providers/cloud.ts";
 import { ZenzLlmProvider } from "./llm/providers/zenz.ts";
+import { setTopicSummarizer, TopicSummarizer } from "./llm/topic.ts";
 
 import { ensure } from "@core/unknownutil/ensure";
 import { is } from "@core/unknownutil/is";
@@ -50,6 +51,12 @@ export const config: Omit<ConfigOptions, "globalDictionaries"> & {
   llmFallbackTimeoutMs: 500,
   llmContextLines: 5,
   llmRerankMaxCandidates: 5,
+  // 文章の話題の要約（zenz の topic 条件に使う）
+  llmTopicEnabled: false,
+  llmTopicEndpoint: "",
+  llmTopicApiKey: "",
+  llmTopicModel: "",
+  llmTopicTimeoutMs: 10000,
 };
 
 type Validators = {
@@ -151,6 +158,11 @@ const validators: Validators = {
   llmFallbackTimeoutMs: (x: unknown) => ensure(x, is.Number),
   llmContextLines: (x: unknown) => ensure(x, is.Number),
   llmRerankMaxCandidates: (x: unknown) => ensure(x, is.Number),
+  llmTopicEnabled: (x: unknown) => ensure(x, is.Boolean),
+  llmTopicEndpoint: (x: unknown) => ensure(x, is.String),
+  llmTopicApiKey: (x: unknown) => ensure(x, is.String),
+  llmTopicModel: (x: unknown) => ensure(x, is.String),
+  llmTopicTimeoutMs: (x: unknown) => ensure(x, is.Number),
 };
 
 async function normalize(
@@ -225,9 +237,25 @@ export async function setConfig(
     setLlmProvider(provider);
     if (config.debug) {
       const healthy = await provider.healthCheck();
-      console.log(`skkeleton: LLM provider "${provider.name}" initialized (healthy=${healthy})`);
+      console.log(
+        `skkeleton: LLM provider "${provider.name}" initialized (healthy=${healthy})`,
+      );
     }
   } else {
     setLlmProvider(null);
+  }
+
+  // 話題の要約器の初期化（要約は zenz ではなく指示に従える別のモデルで行う）
+  if (config.llmEnabled && config.llmTopicEnabled && config.llmTopicEndpoint) {
+    setTopicSummarizer(
+      new TopicSummarizer({
+        endpoint: config.llmTopicEndpoint,
+        apiKey: config.llmTopicApiKey,
+        model: config.llmTopicModel,
+        timeoutMs: config.llmTopicTimeoutMs,
+      }),
+    );
+  } else {
+    setTopicSummarizer(null);
   }
 }

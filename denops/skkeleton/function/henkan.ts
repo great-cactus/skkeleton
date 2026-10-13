@@ -4,6 +4,7 @@ import type { Context } from "../context.ts";
 import { handleKey } from "../keymap.ts";
 import { keyToNotation } from "../notation.ts";
 import type { LlmProvider } from "../llm/provider.ts";
+import { currentTopic } from "../llm/topic.ts";
 import { getOkuriStr } from "../okuri.ts";
 import { HenkanState } from "../state.ts";
 import { currentLibrary, currentLlmProvider } from "../store.ts";
@@ -74,6 +75,9 @@ export async function henkanFirst(context: Context, key: string) {
       const ctx = context.denops
         ? await fetchBufferContext(context.denops, config.llmContextLines)
         : { before: "", after: "" };
+      const topic = context.denops
+        ? await currentTopic(context.denops)
+        : undefined;
       const maxCandidates = config.llmRerankMaxCandidates;
       const toScore = state.candidates.slice(0, maxCandidates);
       const scored = await currentLlmProvider!.scoreCandidates({
@@ -86,6 +90,7 @@ export async function henkanFirst(context: Context, key: string) {
           ? state.henkanFeed + state.okuriFeed
           : state.henkanFeed,
         okuriKana: state.mode === "okuriari" ? state.okuriFeed : "",
+        topic,
       });
       if (scored.length > 0) {
         const reranked = scored.map((s) => s.value);
@@ -103,6 +108,9 @@ export async function henkanFirst(context: Context, key: string) {
       const ctx = context.denops
         ? await fetchBufferContext(context.denops, config.llmContextLines)
         : { before: "", after: "" };
+      const topic = context.denops
+        ? await currentTopic(context.denops)
+        : undefined;
       const llmCandidates = await currentLlmProvider!.generateCandidates({
         word,
         type: state.mode,
@@ -112,6 +120,7 @@ export async function henkanFirst(context: Context, key: string) {
           ? state.henkanFeed + state.okuriFeed
           : state.henkanFeed,
         okuriKana: state.mode === "okuriari" ? state.okuriFeed : "",
+        topic,
       });
       applyLlmFallbackCandidates(state, llmCandidates);
     } catch {

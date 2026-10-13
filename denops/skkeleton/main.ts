@@ -13,6 +13,7 @@ import { initializeStateWithAbbrev } from "./mode.ts";
 import { keyToNotation, notationToKey, receiveNotation } from "./notation.ts";
 import { currentContext, currentLibrary, variables } from "./store.ts";
 import { InputState } from "./state.ts";
+import { updateTopic } from "./llm/topic.ts";
 import type { CompletionData, RankData } from "./types.ts";
 
 import { as, assert, is } from "@core/unknownutil";
@@ -97,6 +98,14 @@ async function init(denops: Denops) {
         ["WinLeave"],
         "*",
         cmd,
+      );
+    }
+    // 挿入モードを抜けたときに文章の話題の要約を（必要なら）裏で更新する
+    if (config.llmEnabled && config.llmTopicEnabled) {
+      helper.define(
+        ["InsertLeave"],
+        "*",
+        `call denops#notify('${denops.name}', 'updateTopic', [])`,
       );
     }
   });
@@ -317,6 +326,9 @@ export const main: Entrypoint = async (denops) => {
     reset() {
       currentContext.init().denops = denops;
       return Promise.resolve();
+    },
+    async updateTopic() {
+      await updateTopic(denops);
     },
     //completion
     getPreEditLength(): Promise<number> {

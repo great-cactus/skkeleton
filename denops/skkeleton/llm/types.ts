@@ -16,6 +16,8 @@ export type LlmScoreRequest = {
   kanaReading?: string;
   /** 送り仮名のかな（okuriari の場合。候補の表層形 = 候補 + okuriKana） */
   okuriKana?: string;
+  /** 文章全体の話題（llm/topic.ts が裏で要約したもの） */
+  topic?: string;
 };
 
 /** F2: スコアリング結果 */
@@ -44,4 +46,6 @@ export type LlmGenerateRequest = {
   kanaReading?: string;
   /** 送り仮名のかな（okuriari の場合） */
   okuriKana?: string;
+  /** 文章全体の話題（llm/topic.ts が裏で要約したもの） */
+  topic?: string;
 };
