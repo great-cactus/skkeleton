@@ -14,8 +14,14 @@
  * F2（リランキング）の分類
  * - homophone-sentence: 同音異義語。正解の手がかりが変換中の文の中にある
  * - homophone-document: 同音異義語。手がかりが主に前の文にある（topic で拾えるかを見る）
+ * - dict-mismatch: 辞書に候補はあるが正解が無い（送り仮名を区切らずに入力した用言、
+ *   語の区切りの誤りなど）。読みの分割（llm/split.ts）と、予備の
+ *   「読みとの比較→生成」で正解を候補に入れられるかを見る。辞書（SKKELETON_EVAL_JISYO）が必要
  */
-export type F2Category = "homophone-sentence" | "homophone-document";
+export type F2Category =
+  | "homophone-sentence"
+  | "homophone-document"
+  | "dict-mismatch";
 
 export type F2Item = {
   /** カーソル前の文章。前の文を含めてよい（プロバイダ側で文単位に絞られる） */
@@ -928,6 +934,509 @@ export const f2Groups: F2Group[] = [
         after: "で備える。",
         expected: "態勢",
       },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "きょうか",
+    candidates: [
+      "強化",
+      "教科",
+      "教化",
+      "狂歌",
+      "供花",
+      "鏡花",
+      "橋架",
+      "凶禍",
+      "莢果",
+    ],
+    items: [
+      {
+        before: "議論の内容は",
+        after: "明日までにお送りします。",
+        expected: "今日か",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ながい",
+    candidates: ["永井", "長井", "長居", "永射"],
+    items: [
+      { before: "この橋は日本で一番", after: "。", expected: "長い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "たかい",
+    candidates: ["他界", "高井"],
+    items: [
+      { before: "東京の家賃はとても", after: "。", expected: "高い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かいた",
+    candidates: ["海田", "頴田"],
+    items: [
+      { before: "先週、論文を一本", after: "。", expected: "書いた" },
+      {
+        before: "公園で風景の絵を",
+        after: "。",
+        expected: "描いた",
+        note:
+          "分割の候補数の上限で正解が入らない。予備（読みとの比較→生成）で拾えるかを見る",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "あかい",
+    candidates: ["赤井"],
+    items: [
+      { before: "夕焼けで空が", after: "。", expected: "赤い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "しろい",
+    candidates: ["白井"],
+    items: [
+      { before: "雪が降って庭が", after: "。", expected: "白い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "あおい",
+    candidates: ["葵", "青井", "碧"],
+    items: [
+      { before: "今日は空がとても", after: "。", expected: "青い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ひろい",
+    candidates: ["広井"],
+    items: [
+      { before: "新しい家はリビングが", after: "。", expected: "広い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ほそい",
+    candidates: ["細井"],
+    items: [
+      { before: "この道は車が通れないほど", after: "。", expected: "細い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "うすい",
+    candidates: ["雨水", "臼井", "碓氷", "碓井", "薄井"],
+    items: [
+      { before: "このスープは味が", after: "。", expected: "薄い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "あさい",
+    candidates: ["浅井", "朝井", "淺井"],
+    items: [
+      { before: "この川は", after: "ので子供でも遊べる。", expected: "浅い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かるい",
+    candidates: ["科類"],
+    items: [
+      { before: "このかばんはとても", after: "。", expected: "軽い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "まるい",
+    candidates: ["丸井"],
+    items: [
+      { before: "今夜は月が", after: "。", expected: "丸い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "いたい",
+    candidates: ["遺体", "異体", "板井"],
+    items: [
+      { before: "転んだ膝がまだ", after: "。", expected: "痛い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かたい",
+    candidates: ["下腿", "化体", "過怠", "歌体", "難"],
+    items: [
+      { before: "このせんべいはとても", after: "。", expected: "硬い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "からい",
+    candidates: ["花蕾", "空井", "渦雷", "柄井"],
+    items: [
+      { before: "このカレーはかなり", after: "。", expected: "辛い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "こい",
+    candidates: ["恋", "故意", "鯉", "濃", "古意", "湖衣", "請い", "戀"],
+    items: [
+      { before: "このコーヒーは味が", after: "。", expected: "濃い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "おもい",
+    candidates: ["思い", "想い", "重茂", "思"],
+    items: [
+      { before: "この荷物はとても", after: "。", expected: "重い" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "きた",
+    candidates: ["北", "喜多", "木田", "喜田"],
+    items: [
+      { before: "昨日、友人が家に遊びに", after: "。", expected: "来た" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "みた",
+    candidates: ["三田", "見田", "美田"],
+    items: [
+      { before: "昨日、映画館で話題の映画を", after: "。", expected: "見た" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ねた",
+    candidates: ["妬"],
+    items: [
+      { before: "昨夜は十時に", after: "。", expected: "寝た" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かった",
+    candidates: ["勝田", "刈田"],
+    items: [
+      { before: "駅前の店で新しい靴を", after: "。", expected: "買った" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "きって",
+    candidates: ["切手"],
+    items: [
+      { before: "紙をはさみで", after: "ください。", expected: "切って" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かって",
+    candidates: ["勝手"],
+    items: [
+      {
+        before: "スーパーで牛乳を",
+        after: "きてください。",
+        expected: "買って",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "おく",
+    candidates: ["奥", "億", "邑久", "尾久", "屋", "憶", "臆", "檍", "奧"],
+    items: [
+      { before: "机の上に本を", after: "。", expected: "置く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かく",
+    candidates: [
+      "核",
+      "格",
+      "各",
+      "角",
+      "画",
+      "確",
+      "閣",
+      "佳句",
+      "斯く",
+      "賀来",
+    ],
+    items: [
+      { before: "毎晩、日記を", after: "ことにしている。", expected: "書く" },
+      {
+        before: "背中がかゆいので",
+        after: "。",
+        expected: "掻く",
+        note:
+          "分割の候補数の上限で正解が入らない。予備（読みとの比較→生成）で拾えるかを見る",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "まく",
+    candidates: ["膜", "幕"],
+    items: [
+      { before: "首にマフラーを", after: "。", expected: "巻く" },
+      {
+        before: "春になったら畑に種を",
+        after: "。",
+        expected: "蒔く",
+        note:
+          "分割の候補数の上限で正解が入らない。予備（読みとの比較→生成）で拾えるかを見る",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "きく",
+    candidates: ["菊", "規矩", "起句", "崎嶇", "危懼", "椈", "鞫", "鞠", "掬"],
+    items: [
+      { before: "毎朝ラジオでニュースを", after: "。", expected: "聞く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "さく",
+    candidates: ["策", "柵", "作", "佐久", "朔", "槊", "搾", "昨", "咋", "窄"],
+    items: [
+      { before: "春になると庭に桜が", after: "。", expected: "咲く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "たく",
+    candidates: ["宅", "卓", "多久", "拓", "託", "托", "択", "擇", "鐸", "鈬"],
+    items: [
+      { before: "炊飯器でご飯を", after: "。", expected: "炊く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "とく",
+    candidates: ["得", "徳", "特", "匿", "慝", "督", "禿", "篤", "悳", "涜"],
+    items: [
+      { before: "数学の問題を", after: "のが好きだ。", expected: "解く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ふく",
+    candidates: ["服", "福", "副", "幅", "輻", "匐", "復", "腹", "複", "覆"],
+    items: [
+      { before: "今日は北風が強く", after: "。", expected: "吹く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "やく",
+    candidates: [
+      "約",
+      "役",
+      "訳",
+      "薬",
+      "厄",
+      "葯",
+      "屋久",
+      "夜久",
+      "龠",
+      "籥",
+    ],
+    items: [
+      { before: "フライパンで魚を", after: "。", expected: "焼く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "まつ",
+    candidates: ["松", "末", "抹", "沫", "秣", "茉", "靺", "枩"],
+    items: [
+      { before: "駅で友人を", after: "。", expected: "待つ" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "たつ",
+    candidates: ["龍", "竜", "辰", "立", "達", "逹", "撻", "韃", "燵", "闥"],
+    items: [
+      { before: "電車ではいつもドアの近くに", after: "。", expected: "立つ" },
+      {
+        before: "あの事故から三年が",
+        after: "。",
+        expected: "経つ",
+        note:
+          "分割の候補数の上限で正解が入らない。予備（読みとの比較→生成）で拾えるかを見る",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かつ",
+    candidates: ["喝", "且つ", "且", "活", "闊", "濶", "括", "筈", "刮", "聒"],
+    items: [
+      { before: "次の試合では必ず", after: "。", expected: "勝つ" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "しる",
+    candidates: ["汁", "什", "知"],
+    items: [
+      { before: "その事実を", after: "人は少ない。", expected: "知る" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かす",
+    candidates: ["粕", "糟", "滓"],
+    items: [
+      { before: "友人に傘を", after: "。", expected: "貸す" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "さす",
+    candidates: ["砂州", "扠首"],
+    items: [
+      { before: "蚊が腕を", after: "。", expected: "刺す" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ます",
+    candidates: ["鱒", "升", "桝", "枡", "舛", "増", "益", "斗"],
+    items: [
+      { before: "雨で川の水かさが", after: "。", expected: "増す" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かう",
+    candidates: ["斯う"],
+    items: [
+      { before: "帰りにパンを", after: "。", expected: "買う" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "あう",
+    candidates: ["央", "奥", "桜", "奧", "媼", "櫻"],
+    items: [
+      { before: "明日、駅で友人と", after: "。", expected: "会う" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "うる",
+    candidates: ["宇留"],
+    items: [
+      { before: "古い本を古本屋に", after: "。", expected: "売る" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ふる",
+    candidates: ["古"],
+    items: [
+      { before: "明日は雨が", after: "らしい。", expected: "降る" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "ひく",
+    candidates: ["低", "引く", "−", "攣", "牽", "佗"],
+    items: [
+      { before: "姉はピアノを", after: "のが上手だ。", expected: "弾く" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "つく",
+    candidates: ["筑", "津久"],
+    items: [
+      { before: "電車は十時に駅に", after: "。", expected: "着く" },
+      {
+        before: "スイッチを押すと部屋の電気が",
+        after: "。",
+        expected: "点く",
+        note:
+          "分割の候補数の上限で正解が入らない。予備（読みとの比較→生成）で拾えるかを見る",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "もつ",
+    candidates: ["物", "勿"],
+    items: [
+      { before: "重い荷物を", after: "のを手伝った。", expected: "持つ" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "うつ",
+    candidates: ["鬱", "欝", "蔚"],
+    items: [
+      { before: "彼は九回にホームランを", after: "。", expected: "打つ" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かれは",
+    candidates: ["枯葉", "枯れ葉"],
+    items: [
+      {
+        before: "昨日会った男性は弟の友人だ。",
+        after: "医者をしている。",
+        expected: "彼は",
+      },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "はなが",
+    candidates: ["花香"],
+    items: [
+      { before: "庭に赤い", after: "咲いた。", expected: "花が" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "きょうは",
+    candidates: ["教派"],
+    items: [
+      { before: "", after: "朝から晴れている。", expected: "今日は" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "かわの",
+    candidates: ["河野", "川野"],
+    items: [
+      { before: "", after: "水が冷たい。", expected: "川の" },
+    ],
+  },
+  {
+    category: "dict-mismatch",
+    reading: "めが",
+    candidates: ["女鹿", "mega"],
+    items: [
+      { before: "朝早く", after: "覚めた。", expected: "目が" },
     ],
   },
 ];

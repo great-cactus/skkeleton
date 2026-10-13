@@ -399,3 +399,45 @@ Deno.test("ZenzLlmProvider - F2 keeps sentence-limited context with topic", asyn
     await mock.close();
   }
 });
+
+Deno.test("ZenzLlmProvider - readingBaseline scores the reading itself", async () => {
+  const mock = createMockServer(async (req) => {
+    const url = new URL(req.url);
+    const body = await req.json();
+    if (url.pathname === "/tokenize") {
+      return Response.json({ tokens: [0, 1, 2] });
+    }
+    const prompt = body.prompt as string;
+    // 読み「ながい」が一番高く、次に「永井」
+    const lp = prompt.endsWith("ながい")
+      ? -0.1
+      : prompt.endsWith("永井")
+      ? -1
+      : -5;
+    return Response.json({
+      choices: [{ logprobs: { token_logprobs: [null, -1, -1, lp] } }],
+      usage: { prompt_tokens: 4 },
+    });
+  });
+  await new Promise((r) => setTimeout(r, 50));
+
+  try {
+    const provider = makeProvider(mock.url);
+    const result = await provider.scoreCandidates({
+      word: "ながい",
+      type: "okurinasi",
+      candidates: ["永井", "長井"],
+      contextBefore: "この橋は",
+      contextAfter: "",
+      kanaReading: "ながい",
+      readingBaseline: true,
+    });
+    assertEquals(result.map((r) => [r.value, r.isBaseline === true]), [
+      ["ながい", true],
+      ["永井", false],
+      ["長井", false],
+    ]);
+  } finally {
+    await mock.close();
+  }
+});

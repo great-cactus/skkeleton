@@ -3,7 +3,7 @@ import { config } from "../config.ts";
 import type { Context } from "../context.ts";
 import { handleKey } from "../keymap.ts";
 import { keyToNotation } from "../notation.ts";
-import type { LlmProvider } from "../llm/provider.ts";
+import { assistCandidates } from "../llm/assist.ts";
 import { currentTopic } from "../llm/topic.ts";
 import { getOkuriStr } from "../okuri.ts";
 import { HenkanState } from "../state.ts";
@@ -68,63 +68,36 @@ export async function henkanFirst(context: Context, key: string) {
   }
   state.candidates = await lib.getHenkanResult(state.mode, word);
 
-  // F2: LLM リランキング — 辞書候補が2件以上あるとき（同期・ブロッキング）
-  // タイムアウト内にスコアリングが完了すれば並べ替えた状態で候補を表示する
-  if (shouldLlmRerank(state.candidates.length, currentLlmProvider)) {
+  // LLM 補助: 読みの分割・並べ替え・生成（同期・ブロッキング）。
+  // 各段のタイムアウト内に終われば、その結果で候補を表示する
+  if (config.llmEnabled && currentLlmProvider != null) {
     try {
-      const ctx = context.denops
-        ? await fetchBufferContext(context.denops, config.llmContextLines)
-        : { before: "", after: "" };
-      const topic = context.denops
-        ? await currentTopic(context.denops)
-        : undefined;
-      const maxCandidates = config.llmRerankMaxCandidates;
-      const toScore = state.candidates.slice(0, maxCandidates);
-      const scored = await currentLlmProvider!.scoreCandidates({
-        word,
+      const denops = context.denops;
+      const topic = denops ? await currentTopic(denops) : undefined;
+      const result = await assistCandidates({
+        provider: currentLlmProvider,
+        lookup: (type, w) => lib.getHenkanResult(type, w),
         type: state.mode,
-        candidates: toScore,
-        contextBefore: ctx.before,
-        contextAfter: ctx.after,
+        word,
         kanaReading: state.mode === "okuriari"
           ? state.henkanFeed + state.okuriFeed
           : state.henkanFeed,
         okuriKana: state.mode === "okuriari" ? state.okuriFeed : "",
+        candidates: state.candidates,
+        getContext: () =>
+          denops
+            ? fetchBufferContext(denops, config.llmContextLines)
+            : Promise.resolve({ before: "", after: "" }),
         topic,
+        rerankK: config.llmRerankMaxCandidates,
+        fallbackEnabled: config.llmFallbackEnabled,
+        // 接頭辞・接尾辞・直接入力では読みを分割しない
+        splitEnabled: state.affix == null && !state.directInput,
       });
-      if (scored.length > 0) {
-        const reranked = scored.map((s) => s.value);
-        const remaining = state.candidates.slice(maxCandidates);
-        state.candidates = [...reranked, ...remaining];
-      }
+      state.candidates = result.candidates;
+      state.llmCandidateIndices = result.llmIndices;
     } catch {
-      // スコアリング失敗時は辞書順のまま
-    }
-  }
-
-  // F1: LLM フォールバック — 辞書に候補がないとき
-  if (shouldLlmFallback(state.candidates.length, currentLlmProvider)) {
-    try {
-      const ctx = context.denops
-        ? await fetchBufferContext(context.denops, config.llmContextLines)
-        : { before: "", after: "" };
-      const topic = context.denops
-        ? await currentTopic(context.denops)
-        : undefined;
-      const llmCandidates = await currentLlmProvider!.generateCandidates({
-        word,
-        type: state.mode,
-        contextBefore: ctx.before,
-        contextAfter: ctx.after,
-        kanaReading: state.mode === "okuriari"
-          ? state.henkanFeed + state.okuriFeed
-          : state.henkanFeed,
-        okuriKana: state.mode === "okuriari" ? state.okuriFeed : "",
-        topic,
-      });
-      applyLlmFallbackCandidates(state, llmCandidates);
-    } catch {
-      // LLM エラー時は無視して従来通り
+      // LLM エラー時は辞書の候補のまま
     }
   }
 
@@ -283,49 +256,4 @@ export async function suffix(context: Context) {
   henkanPoint(context);
   await acceptResult(context, [">", ""], "");
   context.state.affix = "suffix";
-}
-
-// --- テスト可能なヘルパー関数 ---
-
-/**
- * F1 フォールバックの発動条件を判定する
- */
-export function shouldLlmFallback(
-  candidateCount: number,
-  provider: LlmProvider | null,
-): boolean {
-  return (
-    candidateCount === 0 &&
-    config.llmEnabled &&
-    config.llmFallbackEnabled &&
-    provider != null
-  );
-}
-
-/**
- * F2 リランキングの発動条件を判定する
- */
-export function shouldLlmRerank(
-  candidateCount: number,
-  provider: LlmProvider | null,
-): boolean {
-  return (
-    candidateCount >= 2 &&
-    config.llmEnabled &&
-    provider != null
-  );
-}
-
-/**
- * F1 フォールバック結果を state に反映する
- */
-export function applyLlmFallbackCandidates(
-  state: HenkanState,
-  llmCandidates: string[],
-): void {
-  const baseIndex = state.candidates.length;
-  for (let i = 0; i < llmCandidates.length; i++) {
-    state.candidates.push(llmCandidates[i]);
-    state.llmCandidateIndices.add(baseIndex + i);
-  }
 }

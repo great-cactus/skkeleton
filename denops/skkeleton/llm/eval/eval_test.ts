@@ -19,6 +19,8 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { ZenzLlmProvider } from "../providers/zenz.ts";
+import { assistCandidates, type AssistResult } from "../assist.ts";
+import type { HenkanType } from "../../dictionary.ts";
 import { TopicSummarizer } from "../topic.ts";
 import { Dictionary as SkkDictionary } from "../../sources/skk_dictionary.ts";
 import { getOkuriStr } from "../../okuri.ts";
@@ -81,9 +83,10 @@ async function timed<T>(f: () => Promise<T>): Promise<[T, number]> {
 }
 
 let dictionary: SkkDictionary | null = null;
-async function lookup(
-  reading: string,
-  okuri: string | undefined,
+/** SKKELETON_EVAL_JISYO の辞書を引く。辞書が無ければ null */
+async function jisyoLookup(
+  type: HenkanType,
+  word: string,
 ): Promise<string[] | null> {
   if (!jisyoPath) return null;
   if (dictionary == null) {
@@ -93,50 +96,89 @@ async function lookup(
       Deno.env.get("SKKELETON_EVAL_JISYO_ENCODING") ?? "euc-jp",
     );
   }
-  return await dictionary.getHenkanResult(
-    okuri ? "okuriari" : "okurinasi",
-    okuri ? getOkuriStr(reading, okuri) : reading,
-  );
+  return await dictionary.getHenkanResult(type, word);
 }
 
-/** henkanFirst と同じく、先頭 K 件だけ並べ替えて残りを後ろにつなぐ */
-async function rerank(
+const dictKey = (reading: string, okuri: string | undefined) =>
+  okuri ? getOkuriStr(reading, okuri) : reading;
+
+/** 辞書が無いときは、ケースに書いた候補だけを引ける辞書として使う */
+const caseDictionary = new Map(
+  f2Groups.map((g) => [
+    `${g.okuri ? "okuriari" : "okurinasi"}:${dictKey(g.reading, g.okuri)}`,
+    g.candidates,
+  ]),
+);
+async function lookup(type: HenkanType, word: string): Promise<string[]> {
+  return await jisyoLookup(type, word) ??
+    caseDictionary.get(`${type}:${word}`) ?? [];
+}
+
+type AssistRun = { top: string; result: AssistResult; ms: number };
+
+/** henkanFirst と同じ assistCandidates を通して候補の並びを決める */
+async function runAssist(
   g: F2Group,
   candidates: string[],
   before: string,
   after: string,
   topic: string | undefined,
-): Promise<{ top: string; ms: number }> {
-  const k = config.llmRerankMaxCandidates;
+): Promise<AssistRun> {
   const okuri = g.okuri ?? "";
-  const [scored, ms] = await timed(() =>
-    provider.scoreCandidates({
-      word: g.reading + okuri,
+  const [result, ms] = await timed(() =>
+    assistCandidates({
+      provider,
+      lookup,
       type: g.okuri ? "okuriari" : "okurinasi",
-      candidates: candidates.slice(0, k),
-      contextBefore: before,
-      contextAfter: after,
+      word: dictKey(g.reading, g.okuri),
       kanaReading: g.reading + okuri,
       okuriKana: okuri,
+      candidates,
+      getContext: () => Promise.resolve({ before, after }),
       topic,
+      rerankK: config.llmRerankMaxCandidates,
+      fallbackEnabled: true,
+      splitEnabled: true,
     })
   );
-  if (scored.length === 0) {
+  if (
+    !result.trace.reranked && candidates.length + result.trace.split.length >= 2
+  ) {
     throw new Error("scoreCandidates returned no result (server error?)");
   }
-  return { top: stripAnnotation(scored[0].value), ms };
+  return { top: stripAnnotation(result.candidates[0] ?? ""), result, ms };
+}
+
+/** 分割・予備の生成が働いたかを短く表す */
+function route(r: AssistResult): string {
+  const parts: string[] = [];
+  if (r.trace.split.length > 0) parts.push(`分割+${r.trace.split.length}`);
+  if (r.trace.readingWon) {
+    parts.push(`読み1位→生成:${r.trace.generated[0] ?? "なし"}`);
+  }
+  return parts.join(" / ");
 }
 
 /**
- * 並べ替えでは正解に届かない理由（届くなら空文字）。
- * - 候補外: 辞書の候補に正解が無い
+ * 正解が並べ替えの対象に入らない理由（入るなら空文字）。
+ * - 候補外: 辞書・分割・生成のどれにも正解が無い
  * - 上位K件外: 正解が並べ替えの対象（先頭 llmRerankMaxCandidates 件）より後ろにある
  */
-function unreachableReason(candidates: string[], expected: string): string {
-  const idx = candidates.map(stripAnnotation).indexOf(expected);
-  if (idx < 0) return "候補外";
+function unreachableReason(
+  candidates: string[],
+  r: AssistResult,
+  expected: string,
+): string {
+  const dict = candidates.map(stripAnnotation);
+  const idx = dict.indexOf(expected);
   if (idx >= config.llmRerankMaxCandidates) {
     return `上位${config.llmRerankMaxCandidates}件外(${idx + 1}番目)`;
+  }
+  if (
+    idx < 0 && !r.trace.split.includes(expected) &&
+    !r.trace.generated.includes(expected)
+  ) {
+    return "候補外";
   }
   return "";
 }
@@ -151,30 +193,37 @@ type F2Row = {
   llm: string;
   "llm(前のみ)": string;
   "llm+topic": string;
+  route: string;
   issue: string;
   topic: string;
   ms: number;
 };
 
 Deno.test({
-  name: "eval F2: dictionary order vs LLM rerank",
+  name: "eval F2: dictionary order vs LLM assist",
   ignore: !endpoint,
   async fn(t) {
     const rows: F2Row[] = [];
     for (const g of f2Groups) {
-      const fromJisyo = await lookup(g.reading, g.okuri);
-      const candidates = fromJisyo ?? g.candidates;
+      const type = g.okuri ? "okuriari" : "okurinasi";
+      const candidates = await jisyoLookup(type, dictKey(g.reading, g.okuri)) ??
+        g.candidates;
       for (const [i, item] of g.items.entries()) {
         const id = `${g.reading}${g.okuri ?? ""}-${i + 1}`;
-        await t.step(`${g.category} / ${id}`, async () => {
-          const row = await evalF2Item(g, item, candidates, id);
-          rows.push(row);
-          const final = row.topic ? row["llm+topic"] : row.llm;
-          assert(
-            final.startsWith("○"),
-            `期待値 ${item.expected} に対して ${final}` +
-              (row.issue ? ` [${row.issue}]` : ""),
-          );
+        await t.step({
+          name: `${g.category} / ${id}`,
+          // 読みの分割には辞書全体が要る
+          ignore: g.category === "dict-mismatch" && !jisyoPath,
+          fn: async () => {
+            const row = await evalF2Item(g, item, candidates, id);
+            rows.push(row);
+            const final = row.topic ? row["llm+topic"] : row.llm;
+            assert(
+              final.startsWith("○"),
+              `期待値 ${item.expected} に対して ${final}` +
+                (row.issue ? ` [${row.issue}]` : ""),
+            );
+          },
         });
       }
     }
@@ -191,13 +240,13 @@ async function evalF2Item(
   const after = item.after ?? "";
   const topic = await resolveTopic(item);
   const dictTop = stripAnnotation(candidates[0] ?? "");
-  const full = await rerank(g, candidates, item.before, after, undefined);
+  const full = await runAssist(g, candidates, item.before, after, undefined);
   // 文章の末尾で入力しているときはカーソル後に文脈が無い。その場合の結果も見る
   const beforeOnly = after
-    ? await rerank(g, candidates, item.before, "", undefined)
+    ? await runAssist(g, candidates, item.before, "", undefined)
     : full;
   const withTopic = topic
-    ? await rerank(g, candidates, item.before, after, topic)
+    ? await runAssist(g, candidates, item.before, after, topic)
     : null;
   const show = (s: string) => `${mark(s === item.expected)} ${s}`;
   return {
@@ -208,7 +257,8 @@ async function evalF2Item(
     llm: show(full.top),
     "llm(前のみ)": show(beforeOnly.top),
     "llm+topic": withTopic ? show(withTopic.top) : "-",
-    issue: unreachableReason(candidates, item.expected),
+    route: route((withTopic ?? full).result),
+    issue: unreachableReason(candidates, full.result, item.expected),
     topic: topic ?? "",
     ms: (withTopic ?? full).ms,
   };
@@ -290,7 +340,10 @@ Deno.test({
       const id = `${c.reading}-${i + 1}`;
       await t.step(`${c.category} / ${id}`, async () => {
         // 辞書に候補があると、実際の変換では F1 ではなく F2 が動く
-        const dict = await lookup(c.reading, c.okuri);
+        const dict = await jisyoLookup(
+          c.okuri ? "okuriari" : "okurinasi",
+          dictKey(c.reading, c.okuri),
+        );
         const issue = dict && dict.length > 0
           ? `辞書に候補あり(${dict.slice(0, 3).join("/")})`
           : "";

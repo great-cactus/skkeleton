@@ -18,6 +18,11 @@ export type LlmScoreRequest = {
   okuriKana?: string;
   /** 文章全体の話題（llm/topic.ts が裏で要約したもの） */
   topic?: string;
+  /**
+   * 読み（ひらがな）そのものも比較用に採点する。
+   * 読みが辞書のどの候補より文脈に合うなら、辞書の候補はどれも外れている可能性が高い
+   */
+  readingBaseline?: boolean;
 };
 
 /** F2: スコアリング結果 */
@@ -28,6 +33,8 @@ export type ScoredCandidate = {
   logprobSum: number;
   /** トークン数で正規化したスコア */
   logprobAvg: number;
+  /** readingBaseline で加えた比較用の読み（候補としては表示しない） */
+  isBaseline?: boolean;
 };
 
 /** F1: 候補生成リクエスト */

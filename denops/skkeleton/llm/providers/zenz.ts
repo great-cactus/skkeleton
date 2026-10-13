@@ -143,7 +143,12 @@ export class ZenzLlmProvider implements LlmProvider {
 
     try {
       return await deadline(
-        this.#scoreAll(prefix, req.candidates, okuri),
+        this.#scoreAll(
+          prefix,
+          req.candidates,
+          okuri,
+          req.readingBaseline ? kana : undefined,
+        ),
         this.#timeoutMs,
       );
     } catch {
@@ -155,18 +160,36 @@ export class ZenzLlmProvider implements LlmProvider {
     prefix: string,
     candidates: string[],
     okuri: string,
+    baselineReading?: string,
   ): Promise<ScoredCandidate[]> {
     const nPrefix = await this.#countTokens(prefix, this.#timeoutMs);
-    const scored = await Promise.all(candidates.map(async (c) => {
-      // SKK 辞書のアノテーション（"梯;梯子" の ; 以降）は表記ではないので
-      // スコア対象から除く。返す値は元の候補文字列のまま
-      const surface = c.replace(/;.*$/, "") + okuri;
-      const { sum, count } = await this.#scoreSuffix(prefix, surface, nPrefix);
-      return {
-        value: c,
+    // SKK 辞書のアノテーション（"梯;梯子" の ; 以降）は表記ではないので
+    // スコア対象から除く。返す値は元の候補文字列のまま
+    const targets = candidates.map((c) => ({
+      value: c,
+      surface: c.replace(/;.*$/, "") + okuri,
+      isBaseline: false,
+    }));
+    if (baselineReading != null) {
+      targets.push({
+        value: baselineReading,
+        surface: baselineReading,
+        isBaseline: true,
+      });
+    }
+    const scored = await Promise.all(targets.map(async (t) => {
+      const { sum, count } = await this.#scoreSuffix(
+        prefix,
+        t.surface,
+        nPrefix,
+      );
+      const s: ScoredCandidate = {
+        value: t.value,
         logprobSum: sum,
         logprobAvg: count > 0 ? sum / count : -Infinity,
       };
+      if (t.isBaseline) s.isBaseline = true;
+      return s;
     }));
     return scored.sort((a, b) => b.logprobSum - a.logprobSum);
   }
