@@ -9,6 +9,26 @@ kakutei                                          *skkeleton-functions-kakutei*
         入力中や変換中の文字列を確定します。
         何も入力されていない場合、カナ入力などのモードを解除します。
 
+kakuteiUndo                                  *skkeleton-functions-kakuteiUndo*
+        (input)
+        直前に確定した変換を取り消し、変換候補を選択している状態に戻します。
+        いわゆる確定アンドゥです。
+        |skkeleton-completion| による確定も取り消せます。この場合は補完した
+        候補の見出しに対する変換となり、確定した候補が選択された状態から
+        始まります。
+        確定した文字列が、確定した場所に残っている場合のみ動作します。続けて
+        入力した後でもカーソルを戻して動作しますが、確定した文字列自体が書き
+        換えられたり位置がずれたりした場合と、別の行やバッファに移った後は何
+        もしません。
+        カーソルを戻すのは挿入モードのみです。コマンドラインモードと端末モー
+        ドでは、従来どおりカーソルの直前に残っている場合のみ動作します。
+        選び直した候補を確定すると、カーソルは確定アンドゥを実行した位置に
+        戻ります。選び直した候補の長さが元と違う場合は、その差だけずれた位置
+        になります。
+        |skkeleton-functions-purgeCandidate| で候補を削除した後と、辞書登録
+        による確定も取り消せません。skkeletonを無効化した場合も忘れます。
+        ユーザー辞書への学習は取り消されません。
+
 newline                                          *skkeleton-functions-newline*
         (input: <CR>, henkan: <CR>)
         現在の入力を確定し改行します。
@@ -42,12 +62,12 @@ henkanForward                              *skkeleton-functions-henkanForward*
         (henkan: <Space>)
         変換候補を次に進めます。
 
-henkanBackward                             *skkeleton-function-henkanBackward*
+henkanBackward                            *skkeleton-functions-henkanBackward*
         (henkan: x)
         変換候補を前に戻します。
         戻りきった際は入力ステートに戻ります。
 
-purgeCandidate                             *skkeleton-function-purgeCandidate*
+purgeCandidate                            *skkeleton-functions-purgeCandidate*
         (input, henkan)
         現在選択している変換候補をユーザー辞書から削除します。
         変換中以外は直前に確定した候補が対象になります。
@@ -80,6 +100,11 @@ hankatakana                                  *skkeleton-functions-hankatakana*
         (input: <C-q>)
         半角カタカナモードに入ります。
         変換ポイントが設定されている場合は半角カタカナに変換します。
+
+hirakana                                        *skkeleton-functions-hirakana*
+        (input)
+        ひらがなモードに入ります。
+        変換ポイントが設定されている場合はひらがなに変換します。
 
 zenkaku                                          *skkeleton-functions-zenkaku*
         (input)
